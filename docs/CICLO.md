@@ -51,7 +51,32 @@ Instalar solo la skill **no** encadena objetivos. Instalar solo el supervisor
 
 ## 3. Qué pasó en este ciclo
 
-### 3.1 Se verificó el contrato contra el programa real
+### 3.1 Se convirtió en un plugin de MCode
+
+Hasta ahora esto era un programa que había que lanzar y vigilar. Ahora es un
+**plugin de MCode**, y eso cambia dónde ocurre el trabajo.
+
+Un plugin de MCode puede llevar:
+
+- una **skill**, que el agente carga cuando le hace falta;
+- un **hook**, un programa que el host ejecuta en un momento concreto.
+
+El momento concreto que faltaba era el **cierre de turno**: cuando el agente
+termina de responder, el host avisa, el hook comprueba cómo ha quedado el
+objetivo en curso y, si está terminado, **crea el siguiente en esa misma
+sesión** y devuelve el turno al agente para que siga trabajando.
+
+La diferencia con el supervisor en segundo plano es de fondo: el supervisor
+trabaja en una sesión propia, en su propio host; el plugin trabaja **en la
+sesión del usuario**, en su propio host. Nadie tiene que vigilar nada, y no
+hay un procesoviviendo entre turno y turno.
+
+Para que el plugin pudiera entregarse tal cual, hubo que quitarle una
+dependencia: el transporte ACP (el protocolo con el que se habla con el
+programa de MCode) está ahora escrito sobre la biblioteca estándar de Node.
+El paquete que se instala no necesita `npm install` ni ningún paso previo.
+
+### 3.2 Se verificó el contrato contra el programa real
 
 Antes de escribir nada se comprobó qué ofrece realmente el programa instalado
 (la versión 0.6.12), no lo que dice la documentación. Resultado: los métodos
@@ -61,7 +86,13 @@ objetivo se ejecuta solo** en cuanto se crea, sin necesidad de lanzarlo a mano.
 Eso cambió el diseño: el supervisor no necesita "empujar" al objetivo para que
 trabaje. Solo necesita observar y crear el siguiente.
 
-### 3.2 Se mejoró la calidad del código
+En este ciclo se comprobó además otra cosa, que es la que hace posible el
+plugin: **dos clientes pueden hablar de la misma sesión**. Un segundo cliente
+puede leer el objetivo de una sesión que no es suya e, incluso, crear el
+siguiente cuando no hay ninguno activo. Es lo que permite que el hook
+encadene el trabajo **en la sesión del usuario**.
+
+### 3.3 Se mejoró la calidad del código
 
 - **Núcleo puro separado de los efectos.** Un archivo decide *qué* hacer sin
   tocar disco ni red; otro lo ejecuta. Eso permite probar la lógica completa
@@ -74,7 +105,7 @@ trabaje. Solo necesita observar y crear el siguiente.
   documentos, hitos y nombres propios. Ahora un comentario explica qué hace el
   código y por qué, y nada más.
 
-### 3.3 Se añadió descubrimiento de trabajo (lo que faltaba de verdad)
+### 3.4 Se añadió descubrimiento de trabajo (lo que faltaba de verdad)
 
 Antes, el supervisor solo podía encadenar objetivos que alguien hubiera
 escrito a mano en el fichero de misión. Ahora el trabajo sale de **tres
@@ -96,7 +127,7 @@ La exploración también es acotada en el tiempo: una consulta por enfriamiento,
 cada consulta vacía duplica la espera siguiente. Preguntar una y otra vez lo
 mismo sería gastar sin obtener nada.
 
-### 3.4 Se dejó de colgar en silencio
+### 3.5 Se dejó de colgar en silencio
 
 Un objetivo bloqueado, o uno que simplemente se queda quieto, dejaba la misión
 esperando sin que nada dijera que algo iba mal. Ahora se vigila la **firma** del
@@ -106,7 +137,7 @@ configurado, la misión queda dormida **con el motivo escrito a la vista**.
 Importa distinguir "no avanza" de "tarda": un objetivo que está trabajando
 cambia de turnos o de tokens, así que no se marca por el mero paso del tiempo.
 
-### 3.5 Se añadió operación sostenible
+### 3.6 Se añadió operación sostenible
 
 - **Presupuesto de misión.** Se puede fijar un límite de tokens para *toda* la
   misión. Al agotarlo, la cadena se detiene sola en vez de gastar sin fin.
@@ -119,7 +150,7 @@ cambia de turnos o de tokens, así que no se marca por el mero paso del tiempo.
 - **Errores acotados.** Un fallo repetido no dispara un bucle infinito: tras
   varios intentos seguidos la cadena se detiene y avisa.
 
-### 3.6 Se mejoró el arnés de pruebas
+### 3.7 Se mejoró el arnés de pruebas
 
 Antes había cuatro scripts sueltos, cada uno con su propio montaje. Ahora hay
 **un arnés compartido** con un único fichero de escenarios:
@@ -138,7 +169,45 @@ permanentes, así que no hacía falta mantenerlos.
 
 ## 4. Cómo se usa
 
-### Preparar la misión
+### Con el plugin (lo recomendado)
+
+```bash
+npm install
+npm run build
+node dist/cli.js install-plugin        # ensambla el plugin
+mcode plugin add goal-compass -m local # lo registra en MCode
+```
+
+Después, en el repositorio donde quieras encadenar, crea `goal-compass.json`.
+El `workspace` se toma del sitio donde vive el fichero, así que no hace falta
+escribirlo:
+
+```json
+{
+  "missionId": "mi-mision",
+  "objective": "Mejorar y estabilizar este proyecto",
+  "defaultTokenBudget": 120000,
+  "totalTokenBudget": 500000,
+  "backlog": [
+    {
+      "candidateId": "arreglar-el-parseo",
+      "objective": "Corregir la pérdida de relaciones al indexar recursos",
+      "whyNow": "Se observaron cero aristas para recursos con referencias",
+      "evidenceRefs": ["docs/triage.md#terraform-edges"],
+      "doneWhen": ["La reproducción que fallaba ahora pasa"],
+      "risk": "low",
+      "priority": 10,
+      "source": "observed"
+    }
+  ]
+}
+```
+
+Abre una sesión de MCode en ese repositorio y ya está. Cada vez que el agente
+termina su turno, el hook comprueba el objetivo en curso: si está terminado,
+crea el siguiente en esa misma sesión y le devuelve el turno.
+
+### Con el supervisor en segundo plano
 
 Se escribe un fichero `mission.json` (fuera del repositorio que se va a
 mejorar):
@@ -223,10 +292,17 @@ comprueba que aparece en la lista de skills.
 
 Hay dos niveles, y no se mezclan:
 
-**Pruebas permanentes** (`npm test`) — 60 pruebas que corren en menos de un
-segundo, sin programa real. Comprueban la lógica: qué se decide, cuándo se
-crea un objetivo, cuándo no, cómo se reconcilia un fallo a medias, cuándo se
-detecta el estancamiento y qué propuestas de exploración se aceptan.
+**Pruebas permanentes** (`npm test`) — 74 pruebas que corren en menos de tres
+segundos. Comprueban la lógica: qué se decide, cuándo se crea un objetivo,
+cuándo no, cómo se reconcilia un fallo a medias, cuándo se detecta el
+estancamiento y qué propuestas de exploración se aceptan.
+
+Además, dos piezas se prueban contra un **host de mentira que es un proceso
+real**, no contra una simulación: el transporte (troceado de mensajes,
+emparejamiento de respuestas, ida y vuelta de peticiones, forma de los errores)
+y el hook del plugin (el objetivo se crea en la sesión del evento, la misión
+queda con la intención confirmada, y ni un fallo del host ni la falta de tiempo
+rompen el turno).
 
 **Escenarios de aceptación** (`npm run uat`) — contra el programa real, con
 tiempo límite y recibos. Comprueban la capacidad completa:
@@ -244,11 +320,15 @@ dejan un recibo con el resultado de cada comprobación.
 
 ## 6. Lo que el sistema no hace
 
-- **No se conecta a una sesión ya abierta.** El supervisor gobierna la suya
-  propia. Para controlar la sesión de la interfaz gráfica haría falta un
-  puente que el programa no expone.
-- **No publica nada por su cuenta.** Ni `push`, ni releases, ni despliegues.
+- **El supervisor no se conecta a una sesión ya abierta.** Gobierna la suya
+  propia. El **plugin** sí trabaja en la sesión del usuario, porque recibe su
+  identificador en el evento del hook.
+- **El plugin no publica nada por su cuenta.** Ni `push`, ni releases, ni
+  despliegues.
 - **No inventa trabajo.** Sin evidencia en el backlog o en el repositorio, la
   misión se duerme.
 - **No sortea los límites.** Si el objetivo se queda sin presupuesto o sin
   cuota, la cadena para; no crea otro objetivo para esquivarlo.
+- **El plugin no expone un servidor de herramientas.** El agente no consulta el
+  estado de la misión con una herramienta: se mira desde fuera, con
+  `goal-compass status`. Es la ampliación natural del siguiente ciclo.

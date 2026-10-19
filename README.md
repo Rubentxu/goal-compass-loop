@@ -83,13 +83,23 @@ Cada vuelta del supervisor:
 
 - Node.js ≥ 20 (probado con 25.9.0)
 - `mcode` instalado y autenticado, con la función de objetivos habilitada
-- El SDK `@agentclientprotocol/sdk` (dependencia del proyecto)
+- **Ninguna dependencia en tiempo de ejecución**: el transporte ACP está
+  escrito sobre la biblioteca estándar de Node
 
 Comprobación de compatibilidad:
 
 ```bash
 npm run build && node dist/cli.js probe --workspace /tmp
 ```
+
+## Dos formas de usarlo
+
+| | Supervisor en segundo plano | Plugin de MCode |
+|---|---|---|
+| Quién encadena | Un proceso vivo que va mirando | El cierre de turno del propio agente |
+| Dónde ocurre el trabajo | En una sesión ACP propia | **En la sesión del usuario** |
+| Encadenado | Continuo, sin depender del chat | En cada cierre de turno |
+| Para qué | Missions largas y desatendidas | Trabajar con el agente en su propia sesión |
 
 ## Instalación
 
@@ -98,7 +108,43 @@ npm install
 npm run build
 ```
 
-### 1. Instalar la skill (opcional pero recomendado)
+### 1. Instalar el plugin de MCode (recomendado)
+
+```bash
+node dist/cli.js install-plugin        # ensambla el plugin en el marketplace local
+mcode plugin add goal-compass -m local # lo registra en MCode
+```
+
+El plugin lleva dentro la skill y un hook de `Stop`: cuando el agente
+termina su turno, el hook comprueba el objetivo en curso y, si está
+terminado, **crea el siguiente en esa misma sesión** y devuelve el turno al
+agente. No hay ningún proceso de fondo: el cierre de turno es el latido de la
+misión.
+
+Después, en el repositorio donde quieras encadenar, crea `goal-compass.json`
+con la declaración de la misión. El `workspace` se toma del sitio donde vive
+el fichero, así que no hace falta escribirlo.
+
+```json
+{
+  "missionId": "mejora-continua",
+  "objective": "Mejorar y estabilizar este proyecto de forma continua",
+  "backlog": [
+    {
+      "candidateId": "parser-terraform-edges",
+      "objective": "Corregir la pérdida de relaciones Terraform al indexar recursos",
+      "whyNow": "Se observaron cero aristas para recursos con referencias",
+      "evidenceRefs": ["docs/triage.md#terraform-edges"],
+      "doneWhen": ["La reproducción que fallaba ahora pasa"],
+      "risk": "low",
+      "priority": 10,
+      "source": "observed"
+    }
+  ]
+}
+```
+
+### 2. Instalar solo la skill (opcional)
 
 ```bash
 node dist/cli.js install-skill
@@ -110,9 +156,9 @@ sesión nueva y comprueba la lista de skills.
 La skill gobierna *cómo* se trabaja dentro de un objetivo. El supervisor es
 quien encadena.
 
-### 2. Definir la misión
+### 3. Definir la misión del supervisor
 
-Crea un `mission.json` **fuera del repositorio analizado**:
+El supervisor usa un `mission.json` **fuera del repositorio analizado**:
 
 ```json
 {
@@ -172,7 +218,7 @@ Crea un `mission.json` **fuera del repositorio analizado**:
 El backlog se relee del fichero en cada ciclo: si añades un candidato mientras
 la misión está `parked`, el supervisor lo detecta y reanuda solo.
 
-### 3. Arrancar
+### 4. Arrancar
 
 ```bash
 node dist/cli.js init --config ./mission.json   # prepara el estado durable
@@ -191,6 +237,7 @@ node dist/cli.js run  --config ./mission.json   # arranca el bucle
 | `stop --mission <id>` | Detiene la cadena |
 | `probe --workspace <dir>` | Comprueba la extensión ACP contra el host |
 | `install-skill` | Instala la skill en el directorio del programa |
+| `install-plugin` | Ensambla el plugin de MCode en el marketplace local |
 
 Las órdenes del usuario viajan por un fichero de control **aparte** del
 journal, de modo que el supervisor —único escritor del journal— nunca pisa tu
@@ -202,11 +249,14 @@ orden.
 src/
   core/          núcleo puro: tipos y decide.ts (Snapshot -> Decision)
   ports.ts       interfaces de efectos (objetivo, journal, candidatos, exploración…)
-  adapters/      acp-goal.ts · journal.ts · control.ts · candidates.ts
-                 discovery.ts · exploration.ts · mission.ts
+  adapters/      acp-transport.ts · acp-goal.ts · journal.ts · control.ts
+                 candidates.ts · discovery.ts · exploration.ts · mission.ts
+  runtime.ts     montaje de una misión: adaptadores + supervisor
   supervisor.ts  el bucle: observar → decidir → ejecutar → persistir
+  plugin/        hook de continuación y ensamblado del plugin de MCode
   cli.ts         interfaz de línea de comandos
 skill/goal-compass/   Skill instalable con el grafo de 12 nodos
+plugin/                Paquete del plugin de MCode (manifiesto, hook, icono)
 spikes/                arnés + escenarios de aceptación contra el host real
 test/                  pruebas permanentes y arnés compartido
 docs/                  CICLO.md · EVIDENCIA.md · adr/
@@ -219,7 +269,7 @@ llama a la red y no conoce el reloj: recibe un `Snapshot` y devuelve una
 ## Pruebas
 
 ```bash
-npm test          # 43 pruebas permanentes: núcleo y supervisor con dobles en memoria
+npm test          # 74 pruebas permanentes
 npm run uat       # escenarios contra el host real, con recibos
 npm run typecheck
 ```
@@ -230,17 +280,22 @@ caída, escalada por conflicto de autoridad, respeto de los límites del host y
 de la misión, pausa y reanudación, `parked` sin candidatos, rechazo sin
 evidencia, deduplicación por clave estable y descubrimiento de pendientes.
 
-Los escenarios de aceptación (`chain`, `recovery`, `pause`, `budget`) se ejecutan
-en un directorio temporal que se borra al terminar.
+El **transporte ACP** se prueba contra un host de mentira que es un proceso
+real: se comprueba el troceado de los mensajes, el emparejamiento de
+respuestas, el ida y vuelta de peticiones y la forma de los errores. El **hook
+del plugin** se prueba contra ese mismo host: se comprueba que el objetivo se
+crea en la sesión del evento, que la misión queda con la intención confirmada
+y que ni un fallo del host ni la falta de tiempo rompen el turno.
 
-## Lo que este milestone NO hace
+Los escenarios de aceptación (`chain`, `recovery`, `pause`, `budget`,
+`exploration`) se ejecutan en un directorio temporal que se borra al terminar.
 
-- **No controla una sesión ya abierta.** El supervisor gobierna la suya, en un
-  host propio. El programa no expone un puente hacia la sesión de la interfaz.
+## Lo que este proyecto NO hace
+
 - **No publica nada por su cuenta.** `allowRemoteWrite` es `false` por defecto.
-- **La exploración con modelo no está implementada.** El descubrimiento es
-  determinista (backlog + señales del repositorio). El puerto de candidatos es
-  el punto de extensión para añadirla.
+- **El plugin no expone un servidor MCP.** El agente no consulta el estado de
+  la misión con una herramienta: lo hace desde fuera, con `goal-compass status`.
+  Es la ampliación natural del siguiente ciclo.
 - **No mide la calidad de la migración entre versiones del host.** La versión
   del protocolo usada por la extensión está documentada y comprobada, pero no
   hay un contrato versionado que la obligue a evolving.
