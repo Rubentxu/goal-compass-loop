@@ -1,0 +1,35 @@
+{
+  "schema": "goal-compass-mission/v1",
+  "missionId": "example-architecture-improvement",
+  "intent": "Mejorar la calidad, estabilidad y rendimiento de este repositorio de forma continua mediante cambios pequeños y verificables",
+  "sessionScope": "acp-owned-session",
+  "status": "running",
+  "constraints": {
+    "changesMustBeScoped": true,
+    "noNewHeavyTestHarness": true,
+    "allowPush": false,
+    "allowRelease": false,
+    "allowDestructiveCommands": false,
+    "tokenBudgetPerGoal": 30000,
+    "pauseOnQuotaOrBudgetLimit": true
+  },
+  "backlog": [
+    {
+      "candidateId": "parser-regression",
+      "objective": "Localizar y corregir una regresión reproducible del parser sin ampliar el harness",
+      "priority": 10,
+      "evidenceRefs": ["ejemplo: sustituir por issue o archivo real"],
+      "doneWhen": ["Caso fallido reproducible pasa", "Pruebas adyacentes siguen pasando"],
+      "source": "example"
+    },
+    {
+      "candidateId": "simplify-parser-seam",
+      "objective": "Eliminar una responsabilidad duplicada del parser documentada tras corregir la regresión",
+      "priority": 8,
+      "prerequisites": ["parser-regression"],
+      "evidenceRefs": ["ejemplo: reemplazar por evidencia observada"],
+      "doneWhen": ["Responsabilidad tiene un único dueño", "Prueba mínima verde"],
+      "source": "example"
+    }
+  ]
+}

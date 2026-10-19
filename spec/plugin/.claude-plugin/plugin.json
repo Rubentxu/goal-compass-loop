@@ -1,0 +1,9 @@
+{
+  "name": "goal-compass",
+  "version": "0.2.0",
+  "description": "Navegador Goal→Goal para Mission continua; requiere supervisor externo ACP para crear Goals nativos automáticamente",
+  "skills": [
+    "./skills/SKILL.md",
+    "./skills/goal-compass/SKILL.md"
+  ]
+}
