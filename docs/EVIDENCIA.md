@@ -256,15 +256,42 @@ El resto del intercambio, en la misma ejecución:
 ### 4.3 Uso en una sesión real — **PASADO**
 
 Con el plugin instalado y registrado, el agente **llamó** a la herramienta y
-obtuvo el estado de la misión:
+obtuvo el estado de la misión. Transcripción literal de la sesión:
 
 ```text
-mcp__goal-compass__mission_status
+assistant: I'll check the mission status with goal-compass.
+toolCall:  mcp__goal-compass__mission_status  {}
+toolResult: Misión: prueba-mcp — Comprobar que el agente puede ver y gobernar la mision
+            Estado: running
+            Objetivos encadenados: 1
+            Propuestas pendientes: 0
+            Trabajo disponible:
+            - Revisar las notas del repositorio (evidencia: NOTAS.md)
+```
+
+En una sesión posterior, el mismo repositorio, el objetivo ya encadenado había
+subido a dos, y la herramienta lo reflejaba:
+
+```text
+toolResult: Misión: prueba-mcp — Comprobar que el agente puede ver y gobernar la mision
+            Estado: running
+            Objetivos encadenados: 2
+```
+
+El host registra además el origen de cada resultado, de modo que la llamada
+queda atribuida al plugin que la sirve:
+
+```json
+"details": {
+  "mcp": { "isError": false },
+  "server": "goal-compass",
+  "tool": "mission_status",
+  "plugin": "goal-compass"
+}
 ```
 
 Las cinco herramientas aparecen registradas bajo el prefijo
-`mcp__goal-compass__`, y la llamada devolvió el estado real de la misión
-declarada en el repositorio de prueba.
+`mcp__goal-compass__`.
 
 ### 4.4 Defecto encontrado y corregido: el tipo del servidor — **PASADO**
 
@@ -292,8 +319,21 @@ desde el proyecto: el directorio de trabajo del proceso es el home del
 usuario, aunque el proyecto esté en otro sitio.
 
 Consecuencia directa: el servidor no encontraba ninguna misión y todas las
-herramientas respondían "no hay misión declarada". La ruta del proceso no dice
-nada del proyecto; lo que sí lo dice es el entorno:
+herramientas respondían "no hay misión declarada".
+
+La gracia del defecto es que **se ve crecer en la transcripción de sesiones
+reales**, porque cada respuesta decía más que la anterior:
+
+| Sesión real | Qué respondió la herramienta |
+|---|---|
+| Primera | `No hay ninguna misión declarada en este workspace.` |
+| Segunda | lo mismo, más `Buscando en: /var/home/rubentxu` |
+| Tercera | lo mismo, más `Buscando en: /var/home/rubentxu` y `Entorno: PWD=/tmp/gcl-mcp-test` |
+| Tras corregir | `Misión: prueba-mcp — Comprobar que el agente puede ver y gobernar la mision` |
+
+La tercera línea es la que lo resuelve: el host **sí** publica el proyecto, pero
+en la variable `PWD`, no en una variable propia del proyecto. El proceso se
+arranca en el home; la shell conserva el directorio de trabajo.
 
 ```text
 $ cat /proc/<pid>/environ | tr '\0' '\n' | grep -E '^(PWD|MINIMAX_PROJECT_DIR)='
@@ -378,30 +418,47 @@ Los cinco escenarios, con sus comprobaciones:
 
 | Escenario | Comprobaciones | Resultado |
 |---|---|---|
-| `chain` | 10 | Tres objetivos encadenados sin intervención; 119 976 tokens medidos; 14 ms entre el fin de uno y el siguiente |
+| `chain` | 10 | Tres objetivos encadenados sin intervención; 103 481 tokens medidos; el siguiente arranca en 99 ms desde que el anterior se completa |
 | `recovery` | 4 | Un fallo entre crear y confirmar se reconcilia sin duplicar |
 | `pause` | 3 | La orden de pausa detiene el trabajo en curso y la de continuar lo reanuda |
-| `budget` | 3 | Agotado el presupuesto (63 207 tokens), la cadena se detiene sin crear otro objetivo |
+| `budget` | 3 | Agotado el presupuesto (71 708 tokens), la cadena se detiene sin crear otro objetivo |
 | `exploration` | 4 | Sin backlog ni pendientes marcados, la exploración aporta 3 candidatos reales, la evidencia señala a un fichero que existe y se encadena el objetivo |
 
 Fragmento literal del escenario de exploración, que es el que ejercita la
 búsqueda de trabajo con el modelo:
 
 ```text
-[21:58:00.880Z] sin trabajo elegible: se pide una exploracion acotada del workspace
-[22:00:04.920Z] la exploracion aporto 3 candidato(s): la mision continua
-[22:00:07:923Z] decision: create - NOTAS.md lo pide de forma explicita ("cubrirla
-                con una prueba") y el repo no contiene ningun fichero de prueba
-[22:00:08.025Z] goal creado y confirmado: tg_bhw34b3frtmvfssd8i (active)
+[23:06:02.949Z] sin trabajo elegible: se pide una exploracion acotada del workspace
+[23:09:19.346Z] la exploracion aporto 3 candidato(s): la mision continua
+[23:09:22.350Z] decision: create - NOTAS.md termina con 'Hay que escribirla y cubrirla
+                con una prueba' y no existe ningún fichero de test en el repo. Sin
+                congelar el reloj la comprobación sería dependiente de la hora real y
+                podría fallar justo en el límite de medianoche; `node:test` lo resuelve
+                con `mock.timers.enable({ apis: ['Date'], now: fecha })` y
+                `mock.timers.reset()` en `finally` (verificado funcionando en Node 25.9).
 ```
+
+Ese texto no lo escribió el sistema: lo escribió **el modelo**, leyendo el
+repositorio. La exploración es la única fuente de trabajo que no viene de una
+lista escrita a mano, y es la que decide.
 
 Y el del freno de gasto, que es el que se encontró **de forma natural** al
 agotarse el presupuesto:
 
 ```text
-[21:57:55.594Z] goal completado registrado: tg_1tl3btbpzomvfsmb5x (complete(verifier_met))
-[21:57:55.618Z] decision: park - presupuesto de la mision agotado (65535 de 1 tokens)
-[21:57:55.646Z] mision en parked: presupuesto de la mision agotado
+[23:05:57.552Z] decision: park - presupuesto de la mision agotado (71708 de 1 tokens); la mision sigue viva
+[23:05:57.561Z] mision en parked: presupuesto de la mision agotado (71708 de 1 tokens); la mision sigue viva
+```
+
+Y el de la cadena, donde se ve que el trabajo siguiente arranca solo en cuanto
+el anterior se completa:
+
+```text
+[22:55:18.211Z] decision: create - trabajo pendiente de la cadena
+[22:55:18.360Z] goal creado y confirmado: tg_4c6zpza99bmvfurbh2 (active)
+[22:57:54.544Z] goal completado registrado: tg_4c6zpza99bmvfurbh2 (complete(verifier_met))
+[22:57:54.552Z] decision: create - trabajo pendiente de la cadena
+[22:57:54.607Z] goal creado y confirmado: tg_czxq3otv0ymvfuuo3n (active)
 ```
 
 Estos escenarios se ejecutan **con el transporte ACP propio**, sin ninguna
