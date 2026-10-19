@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "goal-compass",
+  "displayName": "Goal Compass",
+  "version": "0.5.0",
+  "description": "Encadena objetivos nativos de MCode dentro de una mision continua: cuando el objetivo en curso termina, el plugin crea el siguiente en la misma sesion y devuelve el turno al agente para que siga trabajando.",
+  "author": "Rubentxu",
+  "icon": "icon.png",
+  "category": "Code",
+  "exampleQueries": [
+    "Continua la mision de este repositorio con el siguiente objetivo util.",
+    "Dime que objetivo toca ahora y por que.",
+    "Enfoca la mision: el trabajo util que queda es descubrirlo, no inventarlo."
+  ],
+  "apps": [],
+  "mcpServers": [],
+  "skills": [
+    "skills/goal-compass/SKILL.md"
+  ],
+  "hooks": [
+    "hooks/auto-continue.json"
+  ]
+}

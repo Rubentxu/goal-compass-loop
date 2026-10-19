@@ -15,11 +15,15 @@ import { parseArgs } from 'node:util';
 import { AcpGoalAdapter } from './adapters/acp-goal.js';
 import { FileControlPort } from './adapters/control.js';
 import { FileJournal, journalPath } from './adapters/journal.js';
-import { loadMissionConfig, toMission } from './adapters/mission.js';
-import { ComposedCandidatePort, MissionConfigCandidatePort, WorkspaceDiscovery } from './adapters/candidates.js';
-import { SessionExploration } from './adapters/exploration.js';
-import type { Journal, MissionStatus } from './core/types.js';
-import { Supervisor } from './supervisor.js';
+import { loadMissionConfig } from './adapters/mission.js';
+import { openMission, ensureMissionState } from './runtime.js';
+import {
+  defaultMarketplaceDir,
+  installPlugin,
+  PLUGIN_NAME,
+  projectRootFromModule,
+} from './plugin/install.js';
+import type { MissionStatus } from './core/types.js';
 
 const logger = {
   info: (message: string) => console.log(`[${new Date().toISOString()}] ${message}`),
@@ -37,6 +41,7 @@ const USAGE = `Goal Compass Loop · supervisor de Goals nativos
   goal-compass pause|resume|stop --mission <id>   ordenes del usuario
   goal-compass probe  --workspace <dir>           comprueba la extension ACP del host
   goal-compass install-skill                       instala la skill goal-compass
+  goal-compass install-plugin                      ensambla el plugin de MCode
 `;
 
 function parse(argv: string[]): { values: Options; positionals: string[] } {
@@ -86,22 +91,8 @@ async function cmdInit(values: Options): Promise<void> {
     return;
   }
 
-  const initial: Journal = {
-    version: 1,
-    missionId: config.missionId,
-    sessionId: undefined,
-    mission: toMission(config),
-    goals: [],
-    intents: [],
-    progress: undefined,
-    explored: [],
-    explorationStreak: 0,
-    lastExplorationAt: undefined,
-    updatedAt: new Date().toISOString(),
-  };
-  await journal.saveAtomically(initial);
+  await ensureMissionState(config, journal, logger);
 
-  logger.info(`mision "${config.missionId}" inicializada`);
   logger.info(`estado durable: ${journal.filePath}`);
   logger.info(`workspace: ${config.workspace}`);
   logger.info(`backlog: ${config.backlog.length} candidato(s)`);
@@ -110,52 +101,10 @@ async function cmdInit(values: Options): Promise<void> {
 async function cmdRun(values: Options): Promise<void> {
   const configPath = requireString(values, 'config', '--config <mission.json>');
   const config = loadMissionConfig(configPath);
-  const journal = new FileJournal(config.missionId);
 
-  if (!(await journal.load())) await cmdInit(values);
-  const state = (await journal.load()) as Journal;
-
-  // El fichero de mision manda sobre la intencion (backlog, workspace,
-  // presupuestos); el journal conserva el estado de ejecucion.
-  state.mission.backlog = config.backlog;
-  state.mission.workspace = config.workspace;
-  state.mission.defaultTokenBudget = config.defaultTokenBudget;
-  state.mission.totalTokenBudget = config.totalTokenBudget;
-  state.mission.maxGoals = config.maxGoals;
-  state.mission.stallTimeoutMs = config.stallTimeoutMs;
-  state.mission.explorationEnabled = config.explorationEnabled;
-  state.mission.explorationCooldownMs = config.explorationCooldownMs;
-  state.mission.allowRemoteWrite = config.allowRemoteWrite;
-  await journal.saveAtomically(state);
-
-  let supervisor: Supervisor | undefined;
-  const adapter = new AcpGoalAdapter({
-    workspace: config.workspace,
-    sessionId: state.sessionId,
-    logger,
-    onGoalUpdate: (event) => {
-      logger.info(
-        `cambio de goal: estado=${event.goal?.status ?? 'sin goal'} ` +
-          `turnos=${event.goal?.turnsUsed ?? '-'} tokens=${event.goal?.tokensUsed ?? '-'}`,
-      );
-      supervisor?.notify();
-    },
-  });
-
-  await adapter.start();
-  state.sessionId = adapter.sessionId();
-  await journal.saveAtomically(state);
-
-  supervisor = new Supervisor({
-    goalPort: adapter,
-    candidatePort: new ComposedCandidatePort([
-      new MissionConfigCandidatePort(configPath),
-      new WorkspaceDiscovery(),
-    ]),
-    journalPort: journal,
-    controlPort: new FileControlPort(config.missionId),
-    explorationPort: new SessionExploration(adapter, config.workspace),
-    clock: { now: () => Date.now() },
+  const { supervisor, adapter } = await openMission({
+    config,
+    configPath,
     logger,
     ...(optionalNumber(values, 'poll-ms') !== undefined
       ? { pollIntervalMs: optionalNumber(values, 'poll-ms')! }
@@ -167,7 +116,7 @@ async function cmdRun(values: Options): Promise<void> {
 
   const shutdown = (): void => {
     logger.info('parada solicitada: cerrando el supervisor');
-    supervisor?.stop();
+    supervisor.stop();
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
@@ -251,6 +200,21 @@ async function cmdInstallSkill(): Promise<void> {
   logger.info('abre una sesion nueva y comprueba la lista de skills');
 }
 
+async function cmdInstallPlugin(values: Options): Promise<void> {
+  const projectRoot = resolveProjectRoot();
+  const marketplaceDir =
+    typeof values.marketplace === 'string' ? values.marketplace : defaultMarketplaceDir();
+  const target = await installPlugin({ projectRoot, marketplaceDir, logger });
+
+  console.log(`plugin ensamblado en ${target}`);
+  console.log('');
+  console.log('registralo en MCode con:');
+  console.log(`  mcode plugin add ${PLUGIN_NAME} -m local`);
+  console.log('');
+  console.log('despues, en el repositorio que quieras encadenar, crea goal-compass.json');
+  console.log('con la declaracion de la mision (missionId, objective y backlog).');
+}
+
 /** Localiza la carpeta de la skill segun como se ejecuto el binario. */
 function resolveSkillSource(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -262,6 +226,19 @@ function resolveSkillSource(): string {
   return candidates.find((candidate) => existsSync(join(candidate, 'SKILL.md'))) ?? candidates[0]!;
 }
 
+/** Localiza la raiz del proyecto segun como se ejecuto el binario. */
+function resolveProjectRoot(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    projectRootFromModule(import.meta.url),
+    resolve(here, '..', '..'),
+    process.cwd(),
+  ];
+  return candidates.find((candidate) =>
+    existsSync(join(candidate, 'plugin', '.minimax-plugin', 'plugin.json')),
+  ) ?? candidates[0]!;
+}
+
 const COMMANDS: Record<string, (values: Options) => Promise<void>> = {
   init: cmdInit,
   run: cmdRun,
@@ -271,6 +248,7 @@ const COMMANDS: Record<string, (values: Options) => Promise<void>> = {
   stop: controlCommand('stopped_by_user'),
   probe: cmdProbe,
   'install-skill': cmdInstallSkill,
+  'install-plugin': cmdInstallPlugin,
 };
 
 async function main(): Promise<void> {

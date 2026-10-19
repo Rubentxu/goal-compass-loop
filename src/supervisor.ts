@@ -53,6 +53,13 @@ const DEFAULT_POLL_MS = 15_000;
 const DEFAULT_PARKED_POLL_MS = 30_000;
 const DEFAULT_MAX_CONSECUTIVE_ERRORS = 5;
 
+/** Resultado de un paso del ciclo. */
+export interface StepOutcome {
+  decision: ReturnType<typeof decide>;
+  /** El Goal creado en este paso, si lo hubo. */
+  created?: GoalState;
+}
+
 /** Despertador: una notificacion reduce la latencia del sondeo. */
 class WakeSignal {
   private resolver: (() => void) | null = null;
@@ -147,22 +154,39 @@ export class Supervisor {
     }
   }
 
-  private async execute(decision: ReturnType<typeof decide>): Promise<void> {
+  /**
+   * Avanza un paso del ciclo y devuelve lo que ha pasado.
+   *
+   * Es la misma logica que el bucle, pero sin esperas: un disparador externo
+   * —un hook de plugin— decide en un instante y se retira. Cuando el paso
+   * crea un Goal, ese Goal es el resultado.
+   */
+  async step(): Promise<StepOutcome> {
+    const decision = await this.evaluate();
+    this.logger.info(`decision: ${decision.kind} - ${decision.reason}`);
+    const created = await this.execute(decision, { wait: false });
+    return { decision, ...(created ? { created } : {}) };
+  }
+
+  private async execute(
+    decision: ReturnType<typeof decide>,
+    options: { wait: boolean } = { wait: true },
+  ): Promise<GoalState | undefined> {
     switch (decision.kind) {
       case 'create':
-        await this.executeCreate(decision.candidate);
-        return;
+        return this.executeCreate(decision.candidate);
       case 'reconcile':
         await this.executeReconcile(decision.intent);
-        return;
+        return undefined;
       case 'park':
-        await this.executePark(decision.reason);
-        return;
+        await this.executePark(decision.reason, options.wait);
+        return undefined;
       case 'wait':
-        await this.executeWait();
-        return;
+        if (options.wait) await this.executeWait();
+        return undefined;
       case 'escalate':
         await this.executeEscalate(decision.reason);
+        return undefined;
     }
   }
 
@@ -312,8 +336,10 @@ export class Supervisor {
 
   /**
    * Transicion durable: intencion -> creacion -> read-back -> commit.
+   *
+   * Devuelve el Goal confirmado, o `undefined` si no se pudo crear.
    */
-  private async executeCreate(candidate: Candidate): Promise<void> {
+  private async executeCreate(candidate: Candidate): Promise<GoalState | undefined> {
     const journal = await this.loadJournal();
     const sessionId = this.goalPort.sessionId();
 
@@ -323,7 +349,7 @@ export class Supervisor {
       this.logger.info(
         `creacion cancelada: el goal actual esta en "${current.status}", no en "complete"`,
       );
-      return;
+      return undefined;
     }
 
     const tokenBudget = candidate.tokenBudget ?? journal.mission.defaultTokenBudget;
@@ -352,7 +378,7 @@ export class Supervisor {
     } catch (err) {
       // La intencion sigue sin confirmar: se reconciliara en el proximo ciclo.
       this.logger.error(`la creacion del goal fallo: ${(err as Error).message}`);
-      return;
+      return undefined;
     }
 
     const readBack = await this.goalPort.read(sessionId);
@@ -364,6 +390,7 @@ export class Supervisor {
     this.logger.info(
       `goal creado y confirmado: ${confirmed.goalId} (${confirmed.status}) - ${candidate.objective.slice(0, 80)}`,
     );
+    return confirmed;
   }
 
   /**
@@ -409,7 +436,7 @@ export class Supervisor {
   }
 
   /** Sin trabajo elegible: la mision sigue viva pero dormida. */
-  private async executePark(reason: string): Promise<void> {
+  private async executePark(reason: string, wait: boolean): Promise<void> {
     const journal = await this.loadJournal();
     if (journal.mission.status !== 'parked') {
       journal.mission.status = 'parked';
@@ -418,7 +445,7 @@ export class Supervisor {
       this.logger.info(`mision en parked: ${reason}`);
     }
     await this.tryExplore(journal);
-    await this.wakeSignal.wait(this.parkedPollIntervalMs);
+    if (wait) await this.wakeSignal.wait(this.parkedPollIntervalMs);
   }
 
   /**

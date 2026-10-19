@@ -66,7 +66,10 @@ function parseCandidate(raw: unknown, index: number): Candidate {
 }
 
 /** Lee y valida el fichero de mision. */
-export function loadMissionConfig(path: string): MissionConfig {
+export function loadMissionConfig(
+  path: string,
+  overrides?: { workspace?: string },
+): MissionConfig {
   const absolute = resolve(path);
   let raw: unknown;
   try {
@@ -82,11 +85,15 @@ export function loadMissionConfig(path: string): MissionConfig {
   const backlogRaw = Array.isArray(c.backlog) ? c.backlog : [];
   const maxGoalsRaw = c.maxGoals;
   const totalTokenBudgetRaw = c.totalTokenBudget;
+  // El workspace puede venir dado: si el fichero vive dentro del workspace
+  // que describe, no hace falta repetirlo.
+  const workspace =
+    overrides?.workspace ?? (typeof c.workspace === 'string' ? c.workspace : undefined);
 
   return {
     missionId: requireString(c.missionId, 'missionId'),
     objective: requireString(c.objective, 'objective'),
-    workspace: resolve(requireString(c.workspace, 'workspace')),
+    workspace: resolve(requireString(workspace, 'workspace')),
     defaultTokenBudget:
       typeof c.defaultTokenBudget === 'number' && c.defaultTokenBudget > 0
         ? c.defaultTokenBudget

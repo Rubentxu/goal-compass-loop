@@ -9,9 +9,7 @@
  * hay integracion posible y se lanza `IncompatibleHostError` en vez de
  * fingir que el trabajo se esta haciendo.
  */
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { Readable, Writable } from 'node:stream';
-import { ClientSideConnection, ndJsonStream, type Client, type Agent } from '@agentclientprotocol/sdk';
+import { AcpTransport } from './acp-transport.js';
 import { IncompatibleHostError, type GoalPort, type Logger } from '../ports.js';
 import type { GoalState } from '../core/types.js';
 
@@ -35,6 +33,8 @@ export interface GoalUpdateEvent {
 export interface AcpGoalOptions {
   /** Ruta del ejecutable del host. */
   command?: string;
+  /** Argumentos del ejecutable del host. */
+  args?: string[];
   /** Workspace de la sesion. */
   workspace: string;
   /** Sesion a reanudar; si no se indica, se crea una nueva. */
@@ -50,8 +50,7 @@ export interface AcpGoalOptions {
 
 /** Cliente ACP de un solo host, dueno unico de la creacion de Goals. */
 export class AcpGoalAdapter implements GoalPort {
-  private child: ChildProcessWithoutNullStreams | undefined;
-  private conn: ClientSideConnection | undefined;
+  private transport: AcpTransport | undefined;
   private activeSessionId: string | undefined;
   private readonly options: AcpGoalOptions;
   private closed = false;
@@ -71,7 +70,7 @@ export class AcpGoalAdapter implements GoalPort {
   /** Reconecta si el host dejo de estar vivo, y reanuda la sesion. */
   async ensureHost(): Promise<void> {
     if (this.closed) throw new Error('el adaptador ACP esta cerrado');
-    if (this.child && this.child.exitCode === null) return;
+    if (this.transport?.isAlive()) return;
     this.options.logger.warn('el host ACP no sigue vivo: se reconecta y se reanuda la sesion');
     await this.connect();
   }
@@ -85,59 +84,28 @@ export class AcpGoalAdapter implements GoalPort {
   }
 
   private async doConnect(): Promise<void> {
-    const command = this.options.command ?? 'mcode';
-    this.options.logger.info(`arrancando host ACP: ${command} acp (cwd=${this.options.workspace})`);
-
-    const child = spawn(command, ['acp'], {
+    const transport = new AcpTransport({
+      command: this.options.command,
+      args: this.options.args ?? ['acp'],
       cwd: this.options.workspace,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...this.options.env },
+      env: this.options.env,
+      logger: this.options.logger,
+      onNotification: (method, params) => this.onNotification(method, params),
+      onRequest: async (method, params) => this.onRequest(method, params),
     });
-    this.child = child;
+    this.transport = transport;
+    await transport.start();
 
-    child.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString().trim();
-      if (text) this.options.logger.info(`[host] ${text.slice(0, 500)}`);
-    });
-    child.on('exit', (code, signal) => {
-      if (!this.closed) {
-        this.options.logger.error(`el host ACP termino (code=${code} signal=${signal})`);
-      }
-    });
-
-    const output = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
-    const input = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
-
-    const toClient = (_agent: Agent): Client => ({
-      sessionUpdate: async (params) => {
-        this.capture(params);
-      },
-      requestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-      extNotification: async (method: string, params: Record<string, unknown>) => {
-        this.options.onNotification?.(method, params);
-        if (method !== 'mcode/session/goal_update') return;
-        const payload = params as { sessionId: string; goal: GoalState | null; goalId?: string };
-        this.options.onGoalUpdate?.({
-          sessionId: payload.sessionId,
-          goal: payload.goal,
-          ...(payload.goalId !== undefined ? { goalId: payload.goalId } : {}),
-        });
-      },
-    });
-
-    const conn = new ClientSideConnection(toClient, ndJsonStream(output, input));
-    this.conn = conn;
-
-    const init = (await conn.initialize({
+    const init = (await transport.request<{ _meta?: Record<string, unknown> }>('initialize', {
       protocolVersion: 1,
       clientCapabilities: { _meta: EXTENSION_META },
-      clientInfo: { name: 'goal-compass-supervisor', version: '0.3.0' },
-    })) as { _meta?: Record<string, unknown> };
+      clientInfo: { name: 'goal-compass-supervisor', version: '1' },
+    })) ?? {};
 
     this.assertGoalExtension(init._meta);
 
     if (this.options.sessionId) {
-      await conn.loadSession({
+      await transport.request('session/load', {
         sessionId: this.options.sessionId,
         cwd: this.options.workspace,
         mcpServers: [],
@@ -145,7 +113,10 @@ export class AcpGoalAdapter implements GoalPort {
       this.activeSessionId = this.options.sessionId;
       this.options.logger.info(`sesion reanudada: ${this.activeSessionId}`);
     } else {
-      const session = await conn.newSession({ cwd: this.options.workspace, mcpServers: [] });
+      const session = await transport.request<{ sessionId: string }>('session/new', {
+        cwd: this.options.workspace,
+        mcpServers: [],
+      });
       this.activeSessionId = session.sessionId;
       this.options.logger.info(`sesion creada: ${this.activeSessionId}`);
     }
@@ -193,7 +164,7 @@ export class AcpGoalAdapter implements GoalPort {
     this.capturedText = '';
     this.capturing = true;
     try {
-      await this.requireConn().prompt({
+      await this.requireTransport().request('session/prompt', {
         sessionId: this.sessionId(),
         prompt: [{ type: 'text', text: question }],
       });
@@ -203,10 +174,36 @@ export class AcpGoalAdapter implements GoalPort {
     return this.capturedText;
   }
 
+  /** Atiende las notificaciones del host. */
+  private onNotification(method: string, params: unknown): void {
+    if (method === 'session/update') {
+      this.capture(params);
+      return;
+    }
+    this.options.onNotification?.(method, params);
+    if (method !== 'mcode/session/goal_update') return;
+    const payload = params as { sessionId: string; goal: GoalState | null; goalId?: string };
+    this.options.onGoalUpdate?.({
+      sessionId: payload.sessionId,
+      goal: payload.goal,
+      ...(payload.goalId !== undefined ? { goalId: payload.goalId } : {}),
+    });
+  }
+
+  /** Responde a las peticiones del host. */
+  private async onRequest(method: string, params: unknown): Promise<unknown> {
+    if (method === 'session/request_permission') {
+      return { outcome: { outcome: 'cancelled' } };
+    }
+    this.options.logger.warn(`peticion del host sin respuesta: ${method}`);
+    void params;
+    throw new Error(`metodo no soportado: ${method}`);
+  }
+
   /** Recoge el texto que el agente va emitiendo mientras se le pregunta. */
-  private capture(params: { update?: unknown }): void {
+  private capture(params: unknown): void {
     if (!this.capturing) return;
-    const update = params.update as
+    const update = (params as { update?: unknown } | null)?.update as
       | { sessionUpdate?: string; content?: { type?: string; text?: string } }
       | undefined;
     if (update?.sessionUpdate !== 'agent_message_chunk') return;
@@ -216,9 +213,10 @@ export class AcpGoalAdapter implements GoalPort {
 
   async read(sessionId: string): Promise<GoalState | null> {
     await this.ensureHost();
-    const result = (await this.requireConn().extMethod('mcode/session/goal/get', { sessionId })) as {
-      goal: GoalState | null;
-    };
+    const result = await this.requireTransport().request<{ goal: GoalState | null }>(
+      'mcode/session/goal/get',
+      { sessionId },
+    );
     return result.goal ?? null;
   }
 
@@ -230,9 +228,10 @@ export class AcpGoalAdapter implements GoalPort {
     await this.ensureHost();
     const params: Record<string, unknown> = { sessionId, objective };
     if (tokenBudget !== undefined) params.tokenBudget = tokenBudget;
-    const result = (await this.requireConn().extMethod('mcode/session/goal/create', params)) as {
-      goal: GoalState;
-    };
+    const result = await this.requireTransport().request<{ goal: GoalState }>(
+      'mcode/session/goal/create',
+      params,
+    );
     return result.goal;
   }
 
@@ -246,35 +245,31 @@ export class AcpGoalAdapter implements GoalPort {
 
   private async setStatus(sessionId: string, status: 'paused' | 'active'): Promise<GoalState | null> {
     await this.ensureHost();
-    const result = (await this.requireConn().extMethod('mcode/session/goal/patch', {
-      sessionId,
-      status,
-    })) as { goal: GoalState };
+    const result = await this.requireTransport().request<{ goal: GoalState }>(
+      'mcode/session/goal/patch',
+      { sessionId, status },
+    );
     return result.goal ?? null;
   }
 
   async clear(sessionId: string): Promise<boolean> {
     await this.ensureHost();
-    const result = (await this.requireConn().extMethod('mcode/session/goal/clear', { sessionId })) as {
-      cleared: boolean;
-    };
+    const result = await this.requireTransport().request<{ cleared: boolean }>(
+      'mcode/session/goal/clear',
+      { sessionId },
+    );
     return result.cleared;
   }
 
-  private requireConn(): ClientSideConnection {
-    if (!this.conn) throw new Error('el host ACP no esta conectado');
-    return this.conn;
+  private requireTransport(): AcpTransport {
+    if (!this.transport) throw new Error('el host ACP no esta conectado');
+    return this.transport;
   }
 
   async close(): Promise<void> {
     this.closed = true;
     // El cierre real es terminar el proceso host que poseemos: eso arrastra el
     // stream y con el la conexion.
-    const child = this.child;
-    if (child && child.exitCode === null) {
-      child.kill('SIGTERM');
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      if (child.exitCode === null) child.kill('SIGKILL');
-    }
+    await this.transport?.close();
   }
 }
