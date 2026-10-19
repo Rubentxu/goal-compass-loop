@@ -20,16 +20,16 @@ adornos.
 
 ```text
 $ npm test
- Test Files  4 passed (4)
-      Tests  45 passed (45)
-   Duration  311ms
+ Test Files  5 passed (5)
+      Tests  60 passed (60)
+   Duration  341ms
 
 $ npm run typecheck     # sin errores
 ```
 
-45 pruebas en menos de medio segundo, sin programa real. Cubren el núcleo
-puro, el supervisor con dobles en memoria, el descubrimiento de señales y los
-puertos de candidatos.
+60 pruebas en menos de medio segundo, sin programa real. Cubren el núcleo
+puro, el supervisor con dobles en memoria, el descubrimiento de señales, los
+puertos de candidatos y la exploración.
 
 ## 2 · Compatibilidad del host — **PASADO**
 
@@ -45,20 +45,8 @@ $ grep -ro "mcode/session/goal[a-z_/]*" --include="*.js" chunks/
 ./chunks/run-acp-command-MV4O4NBX.js:mcode/session/goal/clear      (x2)
 ```
 
-El host anuncia la extension completa en el `initialize`:
-
-```json
-"_meta": {
-  "minimax-code/extensions": {
-    "version": 1,
-    "methods": ["...", "mcode/session/goal/get", "mcode/session/goal/create",
-                "mcode/session/goal/patch", "mcode/session/goal/clear", "..."],
-    "notifications": ["...", "mcode/session/goal_update", "..."]
-  }
-}
-```
-
-Los cuatro métodos respondieron contra el host real:
+El host anuncia la extension completa en el `initialize`, con sus métodos y sus
+notificaciones. Los cuatro métodos respondieron contra el host real:
 
 | Método | Respuesta real |
 |---|---|
@@ -93,35 +81,37 @@ PASA · chain
 PASA · recovery
 PASA · pause
 PASA · budget
+PASA · exploration
 =======================================
 ```
 
-18 comprobaciones, todas en verde. Detalle de cada una:
+**29 comprobaciones, todas en verde.** Detalle de cada escenario:
 
-### `chain` · un objetivo terminado da paso al siguiente (8/8)
+### `chain` · tres objetivos encadenados, sin intervención (10/10)
 
 ```text
-[19:56:09.471] goal creado y confirmado: tg_1mxs00u4yamvfocxlo (active)
-[19:58:18.655] goal completado registrado: tg_1mxs00u4yamvfocxlo (complete(verifier_met))
-[19:58:18.656] decision: create - trabajo pendiente de la cadena
-[19:58:18.806] goal creado y confirmado: tg_lz7rya584ymvfofpec (active)
-[20:01:16.096] goal completado registrado: tg_lz7rya584ymvfofpec (complete(verifier_met))
-[20:01:16.096] decision: park - goal completado y sin trabajo elegible: 2 candidato(s) descartado(s)
+[20:29:53.382] decision: create - trabajo pendiente de la cadena
+[20:32:17.708] goal completado registrado: tg_4oomwqhwglmvfpkbcm (complete(verifier_met))
+[20:32:17.722] decision: create - trabajo pendiente de la cadena
+[20:34:50.947] goal completado registrado: tg_auy62movwdmvfpneq1 (complete(verifier_met))
+[20:34:50.956] decision: create - trabajo pendiente de la cadena
+[20:37:24.209] decision: park - goal completado y sin trabajo elegible: 3 candidato(s) descartado(s)
 ```
 
-**131 ms** entre el `complete` y la creación del siguiente objetivo, sin
-intervención. Y al agotarse los candidatos, la misión queda dormida en lugar
-de inventar trabajo.
+**14 ms** entre el `complete` y la creación del siguiente objetivo. Y al
+agotarse los candidatos, la misión queda dormida en lugar de inventar trabajo.
 
 ```text
-PASA · se crearon dos Goals (2)
+PASA · se crearon tres Goals (3)
 PASA · los Goals tienen identificadores distintos
 PASA · los Goals tienen objetivos distintos
-PASA · el primer Goal termino
-PASA · el segundo Goal termino
+PASA · todos los Goals terminaron
 PASA · el primer trabajo se produjo
 PASA · el segundo trabajo se produjo
+PASA · el tercer trabajo se produjo
+PASA · no hay Goals duplicados
 PASA · la mision no quedo escalada
+PASA · el coste de la cadena es conocido (119976 tokens en 3 Goals)
 ```
 
 ### `recovery` · una transición a medias se reconcilia sin duplicar (4/4)
@@ -130,13 +120,8 @@ Se reprodujo la muerte del supervisor entre la creación y la confirmación, y s
 reinició el host reanudaando la misma sesión.
 
 ```text
-[20:01:25.729] sesion reanudada: mvs_3ebdb9be84bc48099d4ce34c1a338c17
-[20:01:30.706] goal creado y confirmado: tg_77xd7wbwvrmvfojtfv (active)
-```
-
-```text
 PASA · la intencion quedo reconciliada
-PASA · la intencion apunta al Goal original (tg_zwr14ageelmvfojlyp)
+PASA · la intencion apunta al Goal original (tg_j7ev3jdatkmvfpu2rj)
 PASA · no se creo un segundo Goal (1)
 PASA · el host conserva un unico Goal
 ```
@@ -165,9 +150,8 @@ PASA · la pausa no creo Goals nuevos
 ### `budget` · agotado el presupuesto de la misión, la cadena se detiene (3/3)
 
 ```text
-[20:08:40.597] goal completado registrado: tg_g15lw7hyxqmvfoql4r (complete(verifier_met))
-[20:08:40.597] decision: park - presupuesto de la mision agotado; la mision sigue viva
-[20:08:40.606] mision en parked: presupuesto de la mision agotado; la mision sigue viva
+[20:40:05.081] decision: park - presupuesto de la mision agotado (63207 de 1 tokens);
+                   la mision sigue viva
 ```
 
 ```text
@@ -175,6 +159,33 @@ PASA · la mision quedo dormida
 PASA · el motivo es el presupuesto
 PASA · no se encadenó un segundo Goal (1)
 ```
+
+### `exploration` · sin backlog ni pendientes, la exploración encuentra trabajo (4/4)
+
+El trabajo pendiente solo estaba descrito en prosa dentro de `NOTAS.md`, así que
+el escáner determinista no podía verlo. La exploración lo encontró:
+
+```text
+[20:40:10.536] sin trabajo elegible: se pide una exploracion acotada del workspace
+[20:42:52.302] decision: create - El repositorio contiene TypeScript pero no declara
+                   runner, scripts ni configuracion del compilador; hoy el type-check solo
+                   se puede lanzar con flags sueltos y el runner de test depende de una
+                   instalacion global en la maquina. Sin esto, el requisito de NOTAS.md
+                   de "cubrirla con una prueba" no tiene un comando de proyecto
+                   reproducible que un tercero pueda ejecutar.
+[20:42:52.311] intencion persistida: exploracion:2:Declarar la configuracion minima
+                   del pro -> 718f9406-b362-4baf-9e5b-b23c9b54cf48
+```
+
+```text
+PASA · la exploracion aporto candidatos (3)
+PASA · la evidencia senala a un fichero real
+PASA · se creo un Goal a partir de la exploracion
+PASA · el Goal viene de la exploracion
+```
+
+La propuesta no solo era real: detectó que el workspace no tenía configuración
+de proyecto reproducible, un trabajo que ni el backlog ni el escáner veían.
 
 ### `budget_limited` del host — **PASADO (observado de forma natural)**
 
@@ -188,9 +199,9 @@ presupuesto por objetivo de 40 000, insuficiente para worker + verificador.
 ```
 
 El supervisor **no creó un segundo objetivo** y se mantuvo en `wait`
-indefinidamente. Journal final: 1 intención confirmada, 0 objetivos nuevos.
+indefinidamente.
 
-## 4 · Defecto encontrado por los escenarios y corregido
+## 4 · Defectos encontrados por los escenarios y corregidos
 
 El primer pase del escenario `budget` falló una comprobación. Al clasificarlo
 (resultado de un escenario, no del producto) aparecieron **dos** problemas
@@ -206,14 +217,9 @@ veces el objetivo terminado: una como registro del journal y otra como
 objetivo en curso. Con un objetivo de 59 573 tokens, la misión contaba
 **119 146**. El presupuesto se consumía al doble de velocidad.
 
-Corregido en la construcción del snapshot, con una prueba de regresión que
-comprueba que un objetivo ya registrado no vuelve a sumar.
-
-```text
-$ npm test
- Test Files  4 passed (4)
-      Tests  45 passed (45)
-```
+Corregido en la construcción del snapshot, con una prueba de regresión. El
+escenario `budget` posterior confirma la corrección en el host real: el mismo
+objetivo ahora contabiliza **63 207** tokens, no el doble.
 
 ## 5 · Coste real observado
 
@@ -229,6 +235,9 @@ Tokens consumidos por objetivo completo, leídos de los journals:
 | tg_1uzwfobg9pmvfmwgnv | 1 | 61 756 |
 | tg_1mxs00u4yamvfocxlo | 1 | 62 676 |
 | tg_8aj9axn4j8mvfok2bj | 1 | 62 881 |
+
+**Coste de una cadena de 3 objetivos: 119 976 tokens** (unos 40 000 por
+objetivo, medido en la misma cadena).
 
 **Conclusión operativa:** un objetivo trivial consume entre 13 000 y 63 000
 tokens, y la mayoría se acerca a 63 000. El presupuesto por objetivo
@@ -254,11 +263,10 @@ agotaría. Conviene reservar margen o subirlo a 200 000.
   agotar la cuota del usuario, y no procede. La mecánica es idéntica en los
   cuatro: están en el grupo de estados que producen `wait`, y `wait` nunca
   crea un objetivo.
-- **Exploración con modelo: no implementada.** El descubrimiento es
-  determinista (backlog + señales del repositorio). El puerto de candidatos
-  es el punto de extensión.
-- **Comparativa de coste sobre una cadena larga de 3–5 objetivos:** parcial.
-  Se observaron 5 objetivos completos a lo largo de los escenarios, pero no
-  una única cadena larga medida con el mismo objetivo.
-- **Publicación remota:** no hay release publicado automáticamente; el
-  despliegue en el registro de paquetes queda fuera del alcance.
+- **Estancamiento contra el host real: NOT RUN.** El mecanismo está cubierto
+  por pruebas puras del núcleo y del supervisor. Provocarlo contra el host
+  exigiría un objetivo que se quedara quieto durante el margen, lo que
+  consume una ventana de tiempo de reloj completa sin aportar evidencia que
+  las pruebas no den ya.
+- **Publicación remota:** el repositorio y la release se publican a mano; no
+  hay publicación automática en el registro de paquetes.

@@ -77,19 +77,36 @@ trabaje. Solo necesita observar y crear el siguiente.
 ### 3.3 Se añadió descubrimiento de trabajo (lo que faltaba de verdad)
 
 Antes, el supervisor solo podía encadenar objetivos que alguien hubiera
-escrito a mano en el fichero de misión. Ahora también **lee el propio
-repositorio**:
+escrito a mano en el fichero de misión. Ahora el trabajo sale de **tres
+fuentes**, en este orden:
 
-- Detecta **pendientes marcados** en el código (`TODO`, `FIXME`, `XXX`,
-  `HACK`) y sabe exactamente en qué fichero y línea están.
-- Detecta **pruebas omitidas** (`it.skip`, `xit`, `todo`).
-- Convierte cada señal en un objetivo con criterio de cierre comprobable
-  ("el pendiente de `src/parser.ts:42` deja de estar marcado").
+1. **Backlog curado** — lo que el usuario declaró como prioritario. Manda aquí.
+2. **Evidencias del repositorio** — pendientes marcados en el código (`TODO`,
+   `FIXME`, `XXX`, `HACK`) y pruebas omitidas (`it.skip`, `xit`, `todo`), con
+   su ubicación exacta (`fichero:línea`).
+3. **Exploración acotada** — cuando las dos anteriores no ofrecen nada, se
+   puede pedir al agente del host una propuesta de trabajo.
 
-Sin evidencia no hay candidato. Si el repositorio está limpio, no se inventa
-nada: la misión se queda dormida.
+La tercera tiene un candado importante: **la evidencia tiene que señalar a un
+fichero que exista de verdad**. Una propuesta sobre un fichero inexistente se
+descarta sola. Eso es lo que impide el trabajo inventado, que era el riesgo
+evidente de dejar que un modelo proponga tareas.
 
-### 3.4 Se añadió operación sostenible
+La exploración también es acotada en el tiempo: una consulta por enfriamiento, y
+cada consulta vacía duplica la espera siguiente. Preguntar una y otra vez lo
+mismo sería gastar sin obtener nada.
+
+### 3.4 Se dejó de colgar en silencio
+
+Un objetivo bloqueado, o uno que simplemente se queda quieto, dejaba la misión
+esperando sin que nada dijera que algo iba mal. Ahora se vigila la **firma** del
+objetivo (su estado, sus turnos y sus tokens) y, si no cambia durante el margen
+configurado, la misión queda dormida **con el motivo escrito a la vista**.
+
+Importa distinguir "no avanza" de "tarda": un objetivo que está trabajando
+cambia de turnos o de tokens, así que no se marca por el mero paso del tiempo.
+
+### 3.5 Se añadió operación sostenible
 
 - **Presupuesto de misión.** Se puede fijar un límite de tokens para *toda* la
   misión. Al agotarlo, la cadena se detiene sola en vez de gastar sin fin.
@@ -102,7 +119,7 @@ nada: la misión se queda dormida.
 - **Errores acotados.** Un fallo repetido no dispara un bucle infinito: tras
   varios intentos seguidos la cadena se detiene y avisa.
 
-### 3.5 Se mejoró el arnés de pruebas
+### 3.6 Se mejoró el arnés de pruebas
 
 Antes había cuatro scripts sueltos, cada uno con su propio montaje. Ahora hay
 **un arnés compartido** con un único fichero de escenarios:
@@ -206,19 +223,21 @@ comprueba que aparece en la lista de skills.
 
 Hay dos niveles, y no se mezclan:
 
-**Pruebas permanentes** (`npm test`) — 43 pruebas que corren en menos de un
+**Pruebas permanentes** (`npm test`) — 60 pruebas que corren en menos de un
 segundo, sin programa real. Comprueban la lógica: qué se decide, cuándo se
-crea un objetivo, cuándo no, cómo se reconcilia un fallo a medias.
+crea un objetivo, cuándo no, cómo se reconcilia un fallo a medias, cuándo se
+detecta el estancamiento y qué propuestas de exploración se aceptan.
 
 **Escenarios de aceptación** (`npm run uat`) — contra el programa real, con
 tiempo límite y recibos. Comprueban la capacidad completa:
 
 | Escenario | Qué demuestra |
 |---|---|
-| `chain` | Un objetivo terminado da paso a otro, sin intervención. |
+| `chain` | Tres objetivos encadenados, sin intervención del usuario entre ellos. |
 | `recovery` | Un fallo entre crear y confirmar se reconcilia sin duplicar. |
 | `pause` | La orden de pausa detiene el trabajo en curso y la de continuar lo reanuda. |
 | `budget` | Agotado el presupuesto, no se encadena otro objetivo. |
+| `exploration` | Sin backlog ni pendientes marcados, la exploración encuentra trabajo real. |
 
 Los escenarios se ejecutan en un directorio temporal que se borra al terminar, y
 dejan un recibo con el resultado de cada comprobación.

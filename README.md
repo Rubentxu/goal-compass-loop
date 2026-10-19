@@ -19,13 +19,17 @@ sistema entero sin jerga y cuenta qué se ha hecho en este ciclo.
 
 - **Continuidad real.** El objetivo se autoejecuta al crearlo; el supervisor
   solo tiene que observar y encadenar.
-- **Descubrimiento con evidencia.** Los candidatos salen del backlog curado y
-  de lo que el propio repositorio dice (pendientes marcados, pruebas
-  omitidas), con su ubicación exacta. Sin evidencia no hay trabajo.
+- **Descubrimiento con evidencia.** Los candidatos salen del backlog curado, de
+  lo que el propio repositorio dice (pendientes marcados, pruebas omitidas) y,
+  cuando no hay nada de eso, de una **exploración acotada** al agente del host.
+  La evidencia tiene que señalar a un fichero que exista: sin eso, no hay
+  trabajo.
 - **Freno de gasto.** Límite de tokens por objetivo y límite acumulado para la
   misión completa. Al agotarse, la cadena se detiene sola.
 - **Parada útil.** Pausar la misión pausa también el objetivo en curso: deja de
   consumir. Continuar lo reanuda.
+- **Sin silencios.** Un objetivo que deja de avanzar no deja la misión colgada
+  esperando: la misión queda dormida con el motivo a la vista.
 - **Recuperación.** Si el host se cae, el supervisor lo levanta de nuevo, reanuda
   la sesión y sigue. Si el proceso muere entre crear y confirmar, la transición
   se reconcilia sin duplicar nada.
@@ -69,6 +73,7 @@ Cada vuelta del supervisor:
 | Notificación repetida no duplica | La autoridad es el **estado**, no el evento |
 | Caída entre `create` y `commit` no duplica | `intención` persistida + reconciliación con `get` |
 | `blocked`/`paused`/`budget_limited`/`usage_limited` no se esquivan | Espera; nunca se crea otro objetivo para eludir un límite |
+| Un objetivo que no avanza no cuelga la misión en silencio | Firma de progreso; al vencer el margen, la misión queda dormida con el motivo |
 | Agotado el presupuesto de la misión → `parked` | Contador acumulado de tokens en el núcleo |
 | Sin trabajo útil → `parked`, sin burn de tokens | Sondeo lento, sin llamadas al modelo |
 | Deduplicación por intención, no por texto | Clave estable `objetivo + alcance + criterio` |
@@ -117,6 +122,9 @@ Crea un `mission.json` **fuera del repositorio analizado**:
   "defaultTokenBudget": 120000,
   "totalTokenBudget": 500000,
   "maxGoals": null,
+  "stallTimeoutMs": 2700000,
+  "explorationEnabled": true,
+  "explorationCooldownMs": 1800000,
   "allowRemoteWrite": false,
   "backlog": [
     {
@@ -147,6 +155,13 @@ Crea un `mission.json` **fuera del repositorio analizado**:
   de un turno; si puede necesitar dos, conviene 200 000.
 - `totalTokenBudget` es el freno de la misión entera; al agotarse, la cadena
   se detiene.
+- `stallTimeoutMs` es el margen sin avance antes de dar la misión por
+  estancada (45 min por defecto). Un objetivo que sigue trabajando cambia de
+  turnos o de tokens, así que no se marca por el mero paso del tiempo.
+- `explorationEnabled` permite pedir una exploración al agente cuando no hay
+  trabajo elegible. `explorationCooldownMs` (30 min por defecto) es el margen
+  entre consultas; cada consulta vacia duplica la espera siguiente, hasta un
+  tope.
 - `priority` (mayor primero), `risk` (`low` < `medium` < `high`), coste y
   `candidateId` definen un orden **determinista**.
 - `prerequisites` referencia otros `candidateId`: un candidato con un
@@ -186,10 +201,10 @@ orden.
 ```text
 src/
   core/          núcleo puro: tipos y decide.ts (Snapshot -> Decision)
-  ports.ts       interfaces de efectos (objetivo, journal, candidatos…)
+  ports.ts       interfaces de efectos (objetivo, journal, candidatos, exploración…)
   adapters/      acp-goal.ts · journal.ts · control.ts · candidates.ts
-                 discovery.ts · mission.ts
-  supervisor.ts  el bucle: observar -> decidir -> ejecutar -> persistir
+                 discovery.ts · exploration.ts · mission.ts
+  supervisor.ts  el bucle: observar → decidir → ejecutar → persistir
   cli.ts         interfaz de línea de comandos
 skill/goal-compass/   Skill instalable con el grafo de 12 nodos
 spikes/                arnés + escenarios de aceptación contra el host real

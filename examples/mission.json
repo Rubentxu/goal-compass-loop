@@ -5,6 +5,9 @@
   "defaultTokenBudget": 120000,
   "totalTokenBudget": 600000,
   "maxGoals": null,
+  "stallTimeoutMs": 2700000,
+  "explorationEnabled": true,
+  "explorationCooldownMs": 1800000,
   "allowRemoteWrite": false,
   "backlog": [
     {
