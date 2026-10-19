@@ -159,7 +159,13 @@ Lo importante:
 
 - `evidenceRefs` y `doneWhen` **no son opcionales en la práctica**. Un candidato
   sin evidencia o sin criterio de cierre se descarta.
-- `totalTokenBudget` es el freno de gasto de la misión entera.
+- `defaultTokenBudget` necesita holgura. Medido de verdad: un objetivo trivial
+  consume entre 13 000 y 63 000 tokens, y la mayoría se acerca a 63 000 (el
+  programa ejecuta un worker *y* un verificador, y los dos gastan). Con 40 000
+  el objetivo nunca llegó a completarse. 120 000 vale para un objetivo de un
+  turno; si puede necesitar dos, mejor 200 000.
+- `totalTokenBudget` es el freno de gasto de la misión entera; al agotarse, la
+  cadena se detiene.
 - `allowRemoteWrite: false` mantiene el `push`, los despliegues y las
   publicaciones fuera del alcance automático. Requieren autorización explícita.
 

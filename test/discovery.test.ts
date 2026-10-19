@@ -76,6 +76,14 @@ describe('WorkspaceEvidenceScanner · senales de trabajo pendiente', () => {
     expect(await new WorkspaceEvidenceScanner().scan(workspace)).toHaveLength(0);
   });
 
+  it('no confunde un marcador citado como dato con un pendiente real', async () => {
+    const workspace = workspaceWith({
+      'test/fixture.ts': "const sample = { texto: '  // TODO: esto es un ejemplo' };",
+    });
+
+    expect(await new WorkspaceEvidenceScanner().scan(workspace)).toHaveLength(0);
+  });
+
   it('acota el numero de senales devueltas', async () => {
     const files: Record<string, string> = {};
     for (let index = 0; index < 10; index += 1) files[`src/f${index}.ts`] = '// TODO: pendiente';

@@ -3,6 +3,7 @@
   "objective": "Mejorar y estabilizar el proyecto de forma continua, sin intervención manual entre Goals",
   "workspace": "/var/home/rubentxu/Proyectos/Typescript/goalCompassLoop",
   "defaultTokenBudget": 120000,
+  "totalTokenBudget": 600000,
   "maxGoals": null,
   "allowRemoteWrite": false,
   "backlog": [

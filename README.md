@@ -141,8 +141,10 @@ Crea un `mission.json` **fuera del repositorio analizado**:
 - `evidenceRefs` y `doneWhen` son **obligatorios en la práctica**: un candidato
   sin evidencia o sin criterio observable se descarta.
 - `defaultTokenBudget` necesita holgura: el runtime ejecuta worker *y*
-  verificador, y ambos consumen presupuesto. Un objetivo trivial consumió
-  ~50 000 tokens; con 40 000 nunca llegó a completarse. 120 000 deja margen.
+  verificador, y ambos consumen presupuesto. Medido en objetivos triviales, el
+  consumo real va de 13 000 a 63 000 tokens, y la mayoría ronda los 63 000.
+  Con 40 000 nunca llegó a completarse. 120 000 deja margen para un objetivo
+  de un turno; si puede necesitar dos, conviene 200 000.
 - `totalTokenBudget` es el freno de la misión entera; al agotarse, la cadena
   se detiene.
 - `priority` (mayor primero), `risk` (`low` < `medium` < `high`), coste y

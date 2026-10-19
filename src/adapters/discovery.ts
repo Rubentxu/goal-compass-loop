@@ -28,7 +28,10 @@ export interface Evidence {
   doneWhen: string[];
 }
 
-const PENDING_MARKER = /(?:^|\/\/|#|\*|\/\*)\s*(TODO|FIXME|XXX|HACK)\b[: ]?\s*(.*)$/;
+// El marcador tiene que abrir la linea (opcionalmente tras un signo de
+// comentario). Asi un texto que menciona el marcador como dato no se confunde
+// con un pendiente real.
+const PENDING_MARKER = /^\s*(?:\/\/|#|\*|\/\*)?\s*(TODO|FIXME|XXX|HACK)\b[: ]?\s*(.*)$/;
 const SKIPPED_TEST =
   /\b(?:it|test|describe)\.skip\s*\(|\b(?:xit|xtest|xdescribe)\s*\(|\b(?:it|test)\.todo\s*\(/;
 

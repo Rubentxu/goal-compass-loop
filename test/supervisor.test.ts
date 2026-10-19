@@ -278,4 +278,39 @@ describe('supervisor · presupuesto de la mision', () => {
 
     expect(host.createCount).toBe(1);
   });
+
+  it('no cuenta dos veces el Goal que ya esta registrado', async () => {
+    const mission = aMission({ totalTokenBudget: 70_000 });
+    const host = new MemoryGoalHost();
+    host.current = aGoal({
+      goalId: 'tg_registrado',
+      objective: 'trabajo ya terminado',
+      status: 'complete',
+      tokensUsed: 60_000,
+    });
+    const journal = new MemoryJournal({
+      ...anEmptyJournal(mission),
+      goals: [
+        {
+          goalId: 'tg_registrado',
+          objective: 'trabajo ya terminado',
+          status: 'complete',
+          statusReason: 'complete(verifier_met)',
+          tokensUsed: 60_000,
+          turnsUsed: 1,
+          startedAt: NOW - 1_000,
+          endedAt: NOW,
+          candidateId: 'c0',
+          candidateKey: 'otra-clave',
+          receipt: undefined,
+        },
+      ],
+    });
+    const { supervisor, host: goalHost } = build({ host, journal, candidates: [aCandidate()] });
+
+    // 60 000 reales, no 120 000: queda presupuesto y la cadena puede seguir.
+    await supervisor.run();
+
+    expect(goalHost.createCount).toBe(1);
+  });
 });

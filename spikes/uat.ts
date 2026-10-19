@@ -174,15 +174,15 @@ const budget: Scenario = {
         priority: 5,
       }),
     ]);
+    // El presupuesto se fija antes de empezar: el primer objetivo se crea
+    // porque aun no se ha gastado nada, y el segundo ya no entra.
+    await context.patchMission({ totalTokenBudget: 1 });
     context.startSupervisor();
 
     await context.waitFor('el primer Goal terminado', async () => {
       const state = await context.readJournal();
       return state.goals.length >= 1;
     });
-
-    // El presupuesto se fija por debajo de lo ya gastado: la cadena debe detenerse.
-    await context.patchMission({ totalTokenBudget: 1 });
 
     await context.waitFor('la mision dormida por presupuesto', async () => {
       const state = await context.readJournal();

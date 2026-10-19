@@ -182,9 +182,12 @@ export class Supervisor {
     goal: GoalState | null,
     candidates: Candidate[],
   ): Snapshot {
+    // Un Goal ya terminado y registrado no se vuelve a sumar: contarlo dos
+    // veces consumiria el presupuesto de la mision al doble de velocidad.
+    const recorded = new Set(journal.goals.map((record) => record.goalId));
     const tokensUsedTotal =
       journal.goals.reduce((total, record) => total + record.tokensUsed, 0) +
-      (goal ? goal.tokensUsed : 0);
+      (goal && !recorded.has(goal.goalId) ? goal.tokensUsed : 0);
 
     return {
       mission: journal.mission,
