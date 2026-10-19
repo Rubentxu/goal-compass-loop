@@ -1,0 +1,40 @@
+{
+  "missionId": "ejemplo-mision",
+  "objective": "Mejorar y estabilizar el proyecto de forma continua, sin intervención manual entre Goals",
+  "workspace": "/var/home/rubentxu/Proyectos/Typescript/goalCompassLoop",
+  "defaultTokenBudget": 120000,
+  "maxGoals": null,
+  "allowRemoteWrite": false,
+  "backlog": [
+    {
+      "candidateId": "ejemplo-fix",
+      "objective": "Reproducir y corregir el fallo descrito en docs/EVIDENCIA.md, con una prueba que falle antes y pase despues",
+      "whyNow": "El backlog real tiene una incidencia reproducible abierta",
+      "evidenceRefs": ["docs/EVIDENCIA.md#incidencia"],
+      "doneWhen": [
+        "La prueba que fallaba antes pasa despues del cambio",
+        "La suite existente sigue en verde"
+      ],
+      "scope": "src/",
+      "risk": "low",
+      "priority": 10,
+      "prerequisites": [],
+      "source": "observed"
+    },
+    {
+      "candidateId": "ejemplo-mejora",
+      "objective": "Mejorar la clarity de los mensajes de error del supervisor ACP, con casos de prueba",
+      "whyNow": "Depende de la incidencia anterior ya resuelta",
+      "evidenceRefs": ["docs/EVIDENCIA.md#mejora"],
+      "doneWhen": [
+        "Los mensajes de error distinguen el caso concreto",
+        "Hay casos de prueba para cada rama de error"
+      ],
+      "scope": "src/adapters/",
+      "risk": "medium",
+      "priority": 5,
+      "prerequisites": ["ejemplo-fix"],
+      "source": "roadmap"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "goal-compass-loop",
+  "version": "0.2.0",
+  "description": "Supervisor externo que encadena Goals nativos de MCode via ACP extension mcode/session/goal/*",
+  "type": "module",
+  "bin": {
+    "goal-compass": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist",
+    "uat": "tsx spikes/uat.ts"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.0.0"
+  }
+}
