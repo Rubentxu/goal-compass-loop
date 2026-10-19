@@ -15,6 +15,23 @@ el latido de la mision.
   del objetivo en curso. Si esta terminado, decide cual es el siguiente
   trabajo util, crea el objetivo siguiente y devuelve un aviso para que el
   turno continue.
+- **Un servidor de herramientas**: cinco herramientas para que el agente
+  pueda mirar la mision y gobiernarla sin salir de la conversacion.
+
+## Las herramientas
+
+| Herramienta | Que hace |
+|---|---|
+| `mission_status` | En que esta la mision, cuantos objetivos ha encadenado y que trabajo hay disponible. |
+| `mission_propose` | Propone el siguiente objetivo. La evidencia tiene que senalar a un fichero que exista. |
+| `mission_pause` | Pausa la cadena y el objetivo en curso. |
+| `mission_resume` | Reanuda una mision pausada o dormida. |
+| `mission_stop` | Termina la cadena. |
+
+La propuesta es el camino para cuando no hay trabajo marcado: el agente
+investiga, propone con su evidencia, y el cierre de turno siguiente lo
+encadena. Una propuesta sobre un fichero que no existe se descarta, asi que
+llenar la cola de inventos no sirve de nada.
 
 ## Como se usa
 
@@ -36,7 +53,7 @@ el latido de la mision.
          "candidateId": "primer-trabajo",
          "objective": "Que hay que hacer primero",
          "whyNow": "Por que ahora",
-         "evidenceRefs": ["docs/EVIDENCIA.md"],
+         "evidenceRefs": ["docs/notas.md"],
          "doneWhen": ["Como se sabe que esta hecho"],
          "risk": "low",
          "priority": 10,

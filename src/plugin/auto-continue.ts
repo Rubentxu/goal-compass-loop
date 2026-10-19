@@ -12,14 +12,11 @@
  *  - Si algo falla, el turno continua igual. Un plugin nunca deja al
  *    usuario sin respuesta por un problema propio.
  */
-import { existsSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { readMissionConfig, openMission } from '../runtime.js';
+import { openMission } from '../runtime.js';
+import { locateMission } from './mission-locator.js';
 import type { Logger } from '../ports.js';
-
-/** Ficheros donde puede estar la declaracion de una mision, por orden. */
-const MISSION_FILES = ['goal-compass.json', join('.goal-compass', 'mission.json')];
 
 /**
  * Margen que el hook se da a si mismo.
@@ -46,15 +43,6 @@ const logger = {
   warn: (message: string) => process.stderr.write(`[goal-compass] AVISO ${message}\n`),
   error: (message: string) => process.stderr.write(`[goal-compass] ERROR ${message}\n`),
 };
-
-/** Busca el fichero de mision del workspace. */
-export function findMissionFile(cwd: string): string | null {
-  for (const name of MISSION_FILES) {
-    const candidate = join(cwd, name);
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
-}
 
 /** Interpreta el evento que el host entrega por la entrada estandar. */
 export function parseHookEvent(raw: string): HookEvent | null {
@@ -94,18 +82,17 @@ export async function runAutoContinue(
   const cwd = event.cwd;
   if (!sessionId || !cwd) return '';
 
-  const missionFile = findMissionFile(cwd);
-  if (!missionFile) return '';
+  const mission = locateMission(cwd);
+  if (!mission) return '';
 
   let runtime: Awaited<ReturnType<typeof openMission>> | undefined;
   let finished = false;
 
   const work = (async (): Promise<string> => {
     try {
-      const config = readMissionConfig(missionFile, cwd);
       runtime = await openMission({
-        config,
-        configPath: missionFile,
+        config: mission.config,
+        configPath: mission.configPath,
         logger: log,
         sessionId,
         ...(options.host ? { host: options.host } : {}),

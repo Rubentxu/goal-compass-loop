@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "mcpServers": {
+    "goal-compass": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./dist/plugin/mcp-server.js"],
+      "description": "Control de la mision: estado, propuestas de trabajo y ordenes de pausa, reanudacion y parada."
+    }
+  }
+}

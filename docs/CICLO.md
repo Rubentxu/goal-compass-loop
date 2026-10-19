@@ -39,15 +39,21 @@ Hay una limitación en el propio MCode: el modelo **no puede crear otro
 objetivo**. Solo puede leer el actual y marcarlo como terminado. Crear el
 siguiente es una acción que hace el programa, no el modelo.
 
-Por eso el sistema tiene dos piezas con responsabilidades distintas:
+Por eso el sistema tiene tres piezas con responsabilidades distintas:
 
 | Pieza | Dónde vive | Qué hace |
 |---|---|---|
 | **La skill** | `skill/goal-compass/` | Decide *cómo* se trabaja dentro de un objetivo: investigar, diagnosticar, planear, implementar, verificar, desbloquear. Es un mapa de 12 nodos con el que el agente navega. |
 | **El supervisor** | `src/` | Es el único que puede crear objetivos. Observa, decide el siguiente, lo lanza y comprueba que salió bien. |
+| **El servidor de herramientas** | `src/plugin/mcp-server.ts` | Le da al agente cinco herramientas para mirar la misión, proponer trabajo y mandarle órdenes sin salir de la conversación. |
 
 Instalar solo la skill **no** encadena objetivos. Instalar solo el supervisor
 **no** gobierna cómo se trabaja. Las dos juntas, sí.
+
+Y hay un detalle importante en el reparto: **solo el supervisor crea
+objetivos**. Las herramientas no crean nada; proponen. El trabajo de encadenar
+sigue estando en un único sitio, que es lo que evita que dos cosas decidan a
+la vez.
 
 ## 3. Qué pasó en este ciclo
 
@@ -167,6 +173,75 @@ métodos existían, ver que el objetivo se autoejecuta) se han retirado: su
 función vive ahora en el comando `goal-compass probe` y en las pruebas
 permanentes, así que no hacía falta mantenerlos.
 
+### 3.8 El agente por fin puede ver la misión
+
+Hasta ahora el agente era ciego con respecto a la misión: sabía que había un
+objetivo en curso porque el programa se lo decía, pero **no podía mirar el
+estado ni综合治理**. Preguntar el estado de la misión era cosa de una
+terminal, fuera de la conversación.
+
+El plugin ahora entrega un **servidor de herramientas**: cinco funciones que
+el agente puede invocar por su nombre, igual que invoca cualquier otra
+herramienta.
+
+| Herramienta | Qué hace |
+|---|---|
+| `mission_status` | En qué está la misión, cuántos objetivos ha encadenado y qué trabajo hay disponible ahora mismo |
+| `mission_propose` | Propone el siguiente objetivo |
+| `mission_pause` | Pausa la cadena y el objetivo en curso |
+| `mission_resume` | Reanuda una misión pausada o dormida |
+| `mission_stop` | Termina la cadena |
+
+La que más explica el diseño es `mission_propose`. Cuando el agente llega a un
+punto sin trabajo obvio, **no decide** el siguiente objetivo: lo **propone**,
+con la evidencia que ha encontrado. La propuesta se guarda en un fichero aparte
+y, en el siguiente cierre de turno, es el hook quien la encadena si sigue
+siendo válida.
+
+Y aquí está el candado, que es lo mismo que ya se usaba para la exploración:
+**la evidencia tiene que señalar a un fichero que exista de verdad**. Si el
+agente propone "arreglar el parseo" señalando un fichero que no está en el
+repositorio, la propuesta se descarta sin más. Sin esa regla, una herramienta
+que deja proponer trabajo sería una puerta abierta a inventar tareas.
+
+Hay una segunda regla, más sutil: **el servidor de herramientas no escribe en el
+journal**. El journal —el registro donde vive la verdad de la misión— lo sigue
+escribiendo solo quien encadena objetivos. Las órdenes y las propuestas van a
+ficheros aparte, precisamente para que dos procesos no se pisen. Por eso el
+sistema puede tener a la vez al agente hablando con la misión y al hook
+encadenando trabajo.
+
+### 3.9 Fallos que costaron encontrar
+
+Los dos primeros aparecieron de la misma manera: **el plugin desaparecía sin
+decir nada**.
+
+El primero era el icono: el manifiesto de MCode lo exige, y sin él el paquete
+se descarta antes de llegar al catálogo. El segundo fue la entrada del
+servidor de herramientas: en el modo oficial tiene que declarar `"type":
+"stdio"`, y sin esa línea el host no sabe cómo hablar con el servidor y
+descarta el paquete igual. En los dos casos, el listado de plugins no
+mostraba ningún error: el marketplace parecía simplemente vacío.
+
+El tercero no era del plugin, sino del host: **arranca el servidor de
+herramientas desde su propia carpeta**, no desde el proyecto. El directorio de
+trabajo del proceso no dice nada del proyecto; lo que sí lo dice es una
+variable del entorno. Por eso la búsqueda de la misión se hace por el
+entorno, y además **sube por los ancestros**: si el agente está en un
+subdirectorio, la misión se sigue encontrando.
+
+La lección que se repite: cuando algo desaparece sin error, lo primero que hay
+que hacer es **mirar el sitio donde se decide que no existe**, no el sitio
+donde se usa.
+
+Y hay un cuarto, que no es del plugin sino del host: un día el programa dejó de
+arrancar con `agent_name_conflict_migration_failed:lock`. Resultó ser un
+**candado huérfano** de un proceso interrumpido, sobre la carpeta de datos
+entera. Cuando el host falla así, de golpe y en varios comandos a la vez, no
+hay que buscar el fallo en el código propio: hay que mirar el directorio de
+datos y comprobar si el candado está vivo. Si su marca de tiempo no se mueve,
+está huérfano y se puede retirar.
+
 ## 4. Cómo se usa
 
 ### Con el plugin (lo recomendado)
@@ -206,6 +281,11 @@ escribirlo:
 Abre una sesión de MCode en ese repositorio y ya está. Cada vez que el agente
 termina su turno, el hook comprueba el objetivo en curso: si está terminado,
 crea el siguiente en esa misma sesión y le devuelve el turno.
+
+Dentro de la conversación, el agente dispone además de las cinco herramientas
+(`mission_status`, `mission_propose`, `mission_pause`, `mission_resume`,
+`mission_stop`). Basta con pedirle en voz alta que mire el estado de la misión
+o que la pause: el modelo las invoca por su cuenta.
 
 ### Con el supervisor en segundo plano
 
@@ -292,17 +372,20 @@ comprueba que aparece en la lista de skills.
 
 Hay dos niveles, y no se mezclan:
 
-**Pruebas permanentes** (`npm test`) — 74 pruebas que corren en menos de tres
+**Pruebas permanentes** (`npm test`) — 85 pruebas que corren en menos de tres
 segundos. Comprueban la lógica: qué se decide, cuándo se crea un objetivo,
 cuándo no, cómo se reconcilia un fallo a medias, cuándo se detecta el
 estancamiento y qué propuestas de exploración se aceptan.
 
-Además, dos piezas se prueban contra un **host de mentira que es un proceso
+Además, tres piezas se prueban contra un **host de mentira que es un proceso
 real**, no contra una simulación: el transporte (troceado de mensajes,
-emparejamiento de respuestas, ida y vuelta de peticiones, forma de los errores)
-y el hook del plugin (el objetivo se crea en la sesión del evento, la misión
+emparejamiento de respuestas, ida y vuelta de peticiones, forma de los errores),
+el hook del plugin (el objetivo se crea en la sesión del evento, la misión
 queda con la intención confirmada, y ni un fallo del host ni la falta de tiempo
-rompen el turno).
+rompen el turno) y el servidor de herramientas (las peticiones llegan
+emparejadas con su respuesta, una herramienta que no existe se avisa en vez de
+fallar en silencio, y una herramienta que se rompe por dentro devuelve el
+motivo).
 
 **Escenarios de aceptación** (`npm run uat`) — contra el programa real, con
 tiempo límite y recibos. Comprueban la capacidad completa:
@@ -326,9 +409,9 @@ dejan un recibo con el resultado de cada comprobación.
 - **El plugin no publica nada por su cuenta.** Ni `push`, ni releases, ni
   despliegues.
 - **No inventa trabajo.** Sin evidencia en el backlog o en el repositorio, la
-  misión se duerme.
+  misión se duerme. Esto incluye las propuestas del agente: una propuesta sin
+  fichero real detrás se descarta.
 - **No sortea los límites.** Si el objetivo se queda sin presupuesto o sin
   cuota, la cadena para; no crea otro objetivo para esquivarlo.
-- **El plugin no expone un servidor de herramientas.** El agente no consulta el
-  estado de la misión con una herramienta: se mira desde fuera, con
-  `goal-compass status`. Es la ampliación natural del siguiente ciclo.
+- **El servidor de herramientas no crea objetivos.** Solo propone y da órdenes;
+  el cierre de turno es quien encadena.

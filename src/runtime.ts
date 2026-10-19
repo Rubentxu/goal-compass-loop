@@ -16,8 +16,9 @@ import {
   WorkspaceDiscovery,
 } from './adapters/candidates.js';
 import { SessionExploration } from './adapters/exploration.js';
+import { ProposalCandidatePort } from './adapters/proposals.js';
 import type { Journal } from './core/types.js';
-import type { Logger } from './ports.js';
+import type { CandidatePort, Logger } from './ports.js';
 import { Supervisor } from './supervisor.js';
 
 export interface MissionRuntimeOptions {
@@ -40,6 +41,21 @@ export interface MissionRuntime {
   supervisor: Supervisor;
   adapter: AcpGoalAdapter;
   journal: FileJournal;
+}
+
+/**
+ * Fuentes de trabajo, en orden de prioridad.
+ *
+ * El backlog declarado manda, despues lo que se ha propuesto durante la
+ * sesion (ya viene investigada y con su evidencia puesta) y por ultimo las
+ * senales automaticas del repositorio.
+ */
+export function buildCandidatePorts(configPath: string, workspace: string): CandidatePort[] {
+  return [
+    new MissionConfigCandidatePort(configPath),
+    new ProposalCandidatePort(workspace),
+    new WorkspaceDiscovery(),
+  ];
 }
 
 /**
@@ -119,10 +135,7 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
 
   supervisor = new Supervisor({
     goalPort: adapter,
-    candidatePort: new ComposedCandidatePort([
-      new MissionConfigCandidatePort(configPath),
-      new WorkspaceDiscovery(),
-    ]),
+    candidatePort: new ComposedCandidatePort(buildCandidatePorts(configPath, config.workspace)),
     journalPort: journal,
     controlPort: new FileControlPort(config.missionId),
     ...(options.exploration === false

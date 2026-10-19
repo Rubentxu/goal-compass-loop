@@ -121,6 +121,21 @@ terminado, **crea el siguiente en esa misma sesión** y devuelve el turno al
 agente. No hay ningún proceso de fondo: el cierre de turno es el latido de la
 misión.
 
+Además, el plugin entrega cinco herramientas para que el agente pueda mirar
+la misión y gobernarla sin salir de la conversación:
+
+| Herramienta | Qué hace |
+|---|---|
+| `mission_status` | En qué está la misión, cuántos objetivos ha encadenado y qué trabajo hay disponible |
+| `mission_propose` | Propone el siguiente objetivo; la evidencia tiene que señalar a un fichero que exista |
+| `mission_pause` | Pausa la cadena y el objetivo en curso |
+| `mission_resume` | Reanuda una misión pausada o dormida |
+| `mission_stop` | Termina la cadena |
+
+La propuesta es el camino para cuando no hay trabajo marcado: el agente
+investiga, propone con su evidencia, y el cierre de turno siguiente lo
+encadena. Una propuesta sobre un fichero que no existe se descarta.
+
 Después, en el repositorio donde quieras encadenar, crea `goal-compass.json`
 con la declaración de la misión. El `workspace` se toma del sitio donde vive
 el fichero, así que no hace falta escribirlo.
@@ -251,12 +266,13 @@ src/
   ports.ts       interfaces de efectos (objetivo, journal, candidatos, exploración…)
   adapters/      acp-transport.ts · acp-goal.ts · journal.ts · control.ts
                  candidates.ts · discovery.ts · exploration.ts · mission.ts
+                 proposals.ts
   runtime.ts     montaje de una misión: adaptadores + supervisor
   supervisor.ts  el bucle: observar → decidir → ejecutar → persistir
-  plugin/        hook de continuación y ensamblado del plugin de MCode
+  plugin/        hook de continuación, servidor de herramientas y ensamblado
   cli.ts         interfaz de línea de comandos
 skill/goal-compass/   Skill instalable con el grafo de 12 nodos
-plugin/                Paquete del plugin de MCode (manifiesto, hook, icono)
+plugin/                Paquete del plugin de MCode (manifiesto, hook, MCP, icono)
 spikes/                arnés + escenarios de aceptación contra el host real
 test/                  pruebas permanentes y arnés compartido
 docs/                  CICLO.md · EVIDENCIA.md · adr/
@@ -269,7 +285,7 @@ llama a la red y no conoce el reloj: recibe un `Snapshot` y devuelve una
 ## Pruebas
 
 ```bash
-npm test          # 74 pruebas permanentes
+npm test          # 85 pruebas permanentes
 npm run uat       # escenarios contra el host real, con recibos
 npm run typecheck
 ```
@@ -293,9 +309,6 @@ Los escenarios de aceptación (`chain`, `recovery`, `pause`, `budget`,
 ## Lo que este proyecto NO hace
 
 - **No publica nada por su cuenta.** `allowRemoteWrite` es `false` por defecto.
-- **El plugin no expone un servidor MCP.** El agente no consulta el estado de
-  la misión con una herramienta: lo hace desde fuera, con `goal-compass status`.
-  Es la ampliación natural del siguiente ciclo.
 - **No mide la calidad de la migración entre versiones del host.** La versión
   del protocolo usada por la extensión está documentada y comprobada, pero no
   hay un contrato versionado que la obligue a evolving.

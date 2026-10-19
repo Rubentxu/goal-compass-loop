@@ -21,7 +21,7 @@ Tu entrada es la petición actual y la evidencia disponible. Empieza leyendo **s
 
 ## La relación con el Goal siguiente
 
-Un Goal nativo puede terminar en `complete` y **eso no termina la Mission**. El Goal siguiente lo crea el **supervisor ACP externo**, que:
+Un Goal nativo puede terminar en `complete` y **eso no termina la Mission**. El Goal siguiente lo crea el **supervisor**, que:
 
 - confirma `complete` con `mcode/session/goal/get`,
 - elige un candidato con evidencia, criterio de aceptación y prerrequisitos,
@@ -29,9 +29,24 @@ Un Goal nativo puede terminar en `complete` y **eso no termina la Mission**. El 
 
 **Tú no puedes y no debes crear Goals.** `create_goal` no está expuesto al modelo. Nunca simules esa creación ni afirmez que el siguiente Goal ya existe.
 
-Si el supervisor no está operativo (no hay proceso `goal-compass run` activo), indícalo con claridad al usuario: la continuación Goal→Goal **no** será automática. Puedes usar `choose-next` para *proponer* un candidato, pero la creación real será manual.
+Cuando el plugin está instalado, el supervisor es un **hook del cierre de turno**: en cuanto terminas, comprueba el Goal en curso y, si está terminado, crea el siguiente en esa misma sesión y te devuelve el turno. Si el hook no está operativo, indícalo con claridad al usuario: la continuación Goal→Goal **no** será automática.
 
 Los nodos `choose-next` y `await-work` son recursos de **planificación del supervisor**, no comandos ejecutables por el agente tras finalizar un Goal.
+
+## La Mission por dentro
+
+Si el plugin está instalado hay herramientas para mirar la Mission y para
+proponer trabajo. Úsalas cuando te sirvan, no por costumbre:
+
+| Herramienta | Para qué |
+|---|---|
+| `mission_status` | Saber en qué está la Mission y qué trabajo hay disponible. |
+| `mission_propose` | Proponer el siguiente objetivo cuando no hay trabajo obvious. |
+| `mission_pause` / `mission_resume` / `mission_stop` | Mandar una orden sobre la cadena. |
+
+`mission_propose` exige que la evidencia señale a un fichero que exista de
+verdad: una propuesta sobre un fichero inexistente se descarta. No inventes
+trabajo para llenar la cola.
 
 ## Anclas
 

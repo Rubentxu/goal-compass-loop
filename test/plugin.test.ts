@@ -10,11 +10,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  findMissionFile,
-  parseHookEvent,
-  runAutoContinue,
-} from '../src/plugin/auto-continue.js';
+import { parseHookEvent, runAutoContinue } from '../src/plugin/auto-continue.js';
+import { findMissionFile, findMissionFileUpwards } from '../src/plugin/mission-locator.js';
 import { installPlugin, PLUGIN_NAME } from '../src/plugin/install.js';
 import type { Logger } from '../src/ports.js';
 
@@ -146,6 +143,7 @@ describe('ensamblado del plugin', () => {
 
     mkdirSync(join(projectRoot, 'plugin', '.minimax-plugin'), { recursive: true });
     mkdirSync(join(projectRoot, 'plugin', 'hooks'), { recursive: true });
+    mkdirSync(join(projectRoot, 'plugin', 'mcpServers'), { recursive: true });
     mkdirSync(join(projectRoot, 'skill', PLUGIN_NAME), { recursive: true });
     mkdirSync(join(projectRoot, 'dist', 'plugin'), { recursive: true });
 
@@ -155,6 +153,11 @@ describe('ensamblado del plugin', () => {
       'utf8',
     );
     writeFileSync(join(projectRoot, 'plugin', 'hooks', 'auto-continue.json'), '{}', 'utf8');
+    writeFileSync(
+      join(projectRoot, 'plugin', 'mcpServers', 'goal-compass.mcp.json'),
+      '{"schemaVersion":1,"mcpServers":{}}',
+      'utf8',
+    );
     writeFileSync(join(projectRoot, 'plugin', 'icon.png'), 'png', 'utf8');
     writeFileSync(join(projectRoot, 'skill', PLUGIN_NAME, 'SKILL.md'), '# skill', 'utf8');
     writeFileSync(join(projectRoot, 'dist', 'plugin', 'auto-continue.js'), '//', 'utf8');
@@ -167,6 +170,7 @@ describe('ensamblado del plugin', () => {
 
     expect(existsSync(join(target, '.minimax-plugin', 'plugin.json'))).toBe(true);
     expect(existsSync(join(target, 'hooks', 'auto-continue.json'))).toBe(true);
+    expect(existsSync(join(target, 'mcpServers', 'goal-compass.mcp.json'))).toBe(true);
     expect(existsSync(join(target, 'icon.png'))).toBe(true);
     expect(existsSync(join(target, 'skills', PLUGIN_NAME, 'SKILL.md'))).toBe(true);
     expect(existsSync(join(target, 'dist', 'plugin', 'auto-continue.js'))).toBe(true);

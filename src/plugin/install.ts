@@ -57,6 +57,9 @@ export async function installPlugin(options: PluginInstallOptions): Promise<stri
     recursive: true,
   });
   cpSync(join(projectRoot, 'plugin', 'hooks'), join(target, 'hooks'), { recursive: true });
+  cpSync(join(projectRoot, 'plugin', 'mcpServers'), join(target, 'mcpServers'), {
+    recursive: true,
+  });
   cpSync(join(projectRoot, 'plugin', 'icon.png'), join(target, 'icon.png'));
   cpSync(join(projectRoot, 'skill', PLUGIN_NAME), join(target, 'skills', PLUGIN_NAME), {
     recursive: true,
