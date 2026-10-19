@@ -65,6 +65,9 @@ export function aMission(overrides: Partial<Mission> = {}): Mission {
     defaultTokenBudget: 100_000,
     totalTokenBudget: null,
     maxGoals: null,
+    stallTimeoutMs: 45 * 60_000,
+    explorationEnabled: true,
+    explorationCooldownMs: 30 * 60_000,
     workspace: '/tmp/workspace',
     backlog: [],
     allowRemoteWrite: false,
@@ -84,6 +87,7 @@ export function aSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     completedCandidateKeys: [],
     goalsCreated: 0,
     tokensUsedTotal: 0,
+    goalProgressSince: null,
     now: NOW,
     ...overrides,
   };
@@ -98,6 +102,10 @@ export function anEmptyJournal(mission: Mission = aMission()): Journal {
     mission,
     goals: [],
     intents: [],
+    progress: undefined,
+    explored: [],
+    explorationStreak: 0,
+    lastExplorationAt: undefined,
     updatedAt: new Date(NOW).toISOString(),
   };
 }

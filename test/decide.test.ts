@@ -105,6 +105,46 @@ describe('decide · nucleo puro', () => {
     );
     expect(decision.kind).toBe('create');
   });
+
+  it('espera mientras el objetivo sigue avanzando', () => {
+    const decision = decide(
+      aSnapshot({
+        goal: aGoal({ status: 'active' }),
+        candidates: [aCandidate()],
+        mission: aMission({ stallTimeoutMs: 60_000 }),
+        goalProgressSince: 1_699_999_990_000,
+        now: 1_700_000_000_000,
+      }),
+    );
+    expect(decision.kind).toBe('wait');
+  });
+
+  it('da la mision por estancada cuando el objetivo no avanza', () => {
+    const decision = decide(
+      aSnapshot({
+        goal: aGoal({ status: 'active' }),
+        candidates: [aCandidate()],
+        mission: aMission({ stallTimeoutMs: 60_000 }),
+        goalProgressSince: 1_699_999_000_000,
+        now: 1_700_000_000_000,
+      }),
+    );
+    expect(decision.kind).toBe('park');
+    expect(decision.reason).toContain('sin avanzar');
+  });
+
+  it('detecta el estancamiento tambien en un objetivo bloqueado', () => {
+    const decision = decide(
+      aSnapshot({
+        goal: aGoal({ status: 'blocked' }),
+        mission: aMission({ stallTimeoutMs: 60_000 }),
+        goalProgressSince: 1_699_999_000_000,
+        now: 1_700_000_000_000,
+      }),
+    );
+    expect(decision.kind).toBe('park');
+    expect(decision.reason).toContain('blocked');
+  });
 });
 
 describe('selectCandidates · elegibilidad y deduplicacion', () => {

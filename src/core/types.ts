@@ -84,6 +84,12 @@ export interface Mission {
   totalTokenBudget: number | null;
   /** Limite de Goals encadenados en una misma sesion. `null` = sin limite. */
   maxGoals: number | null;
+  /** Milisegundos sin avance antes de dar la mision por estancada. */
+  stallTimeoutMs: number;
+  /** Autorizado a pedir una exploracion cuando no hay trabajo elegible. */
+  explorationEnabled: boolean;
+  /** Milisegundos entre exploraciones, para no repetir la misma consulta. */
+  explorationCooldownMs: number;
   /** Raiz del workspace donde se ejecuta el Goal. */
   workspace: string;
   /** Backlog conocido, en orden de preferencia del autor. */
@@ -123,6 +129,15 @@ export interface GoalRecord {
   receipt: string | undefined;
 }
 
+/** Ultimo avance observado del Goal en curso, para detectar estancamiento. */
+export interface GoalProgress {
+  goalId: string;
+  /** Firma del estado: cambia cuando el Goal avanza de verdad. */
+  signature: string;
+  /** Momento en el que se observo ese estado. */
+  since: number;
+}
+
 /** Estado durable del supervisor. */
 export interface Journal {
   version: 1;
@@ -131,6 +146,13 @@ export interface Journal {
   mission: Mission;
   goals: GoalRecord[];
   intents: TransitionIntent[];
+  progress: GoalProgress | undefined;
+  /** Candidatos propuestos por la exploracion y aun no consumidos. */
+  explored: Candidate[];
+  /** Exploraciones seguidas sin resultado: alargan el enfriamiento. */
+  explorationStreak: number;
+  /** Momento de la ultima exploracion, para respetar el enfriamiento. */
+  lastExplorationAt: number | undefined;
   updatedAt: string;
 }
 
@@ -166,6 +188,8 @@ export interface Snapshot {
   goalsCreated: number;
   /** Tokens gastados por la mision hasta ahora, sumando los Goals ya terminados. */
   tokensUsedTotal: number;
+  /** Milisegundos desde el ultimo avance observado del Goal en curso. */
+  goalProgressSince: number | null;
   /** Marca temporal para decisiones dependientes del tiempo. */
   now: number;
 }

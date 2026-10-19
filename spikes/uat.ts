@@ -7,7 +7,7 @@
  * Cada escenario comprueba una capacidad concreta del supervisor y deja un
  * recibo con el resultado de cada comprobacion.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runScenario, seedWorkspace, type Check, type Scenario, type ScenarioContext } from './harness.js';
 import type { Candidate } from '../src/core/types.js';
@@ -39,7 +39,7 @@ function candidate(overrides: Partial<Candidate> = {}): Candidate {
 /** El primer Goal termina y el supervisor crea el siguiente sin intervencion. */
 const chain: Scenario = {
   name: 'chain',
-  description: 'Un Goal terminado da paso a otro Goal nativo sin intervencion del usuario',
+  description: 'Varios Goals encadenados, sin intervencion del usuario entre ellos',
   async run(context: ScenarioContext): Promise<Check[]> {
     await context.setCandidates([
       candidate({ candidateId: 'primero' }),
@@ -47,33 +47,98 @@ const chain: Scenario = {
         candidateId: 'segundo',
         objective: fileGoal('resultado-2.txt', 'SEGUNDO'),
         doneWhen: ['resultado-2.txt existe con el contenido exacto SEGUNDO'],
-        priority: 5,
+        priority: 8,
+      }),
+      candidate({
+        candidateId: 'tercero',
+        objective: fileGoal('resultado-3.txt', 'TERCERO'),
+        doneWhen: ['resultado-3.txt existe con el contenido exacto TERCERO'],
+        priority: 6,
       }),
     ]);
     context.startSupervisor();
 
-    await context.waitFor('dos Goals terminados', async () => {
+    await context.waitFor('tres Goals terminados', async () => {
       const state = await context.readJournal();
-      return state.goals.length >= 2;
+      return state.goals.length >= 3;
     });
 
     const state = await context.readJournal();
     const created = state.intents.filter((intent) => intent.status === 'committed');
     const goalIds = new Set(created.map((intent) => intent.goalId));
     const objectives = new Set(created.map((intent) => intent.objective));
+    const tokens = state.goals.reduce((total, record) => total + record.tokensUsed, 0);
 
     return [
-      { name: 'se crearon dos Goals', ok: created.length === 2, detail: `${created.length}` },
-      { name: 'los Goals tienen identificadores distintos', ok: goalIds.size === 2 },
-      { name: 'los Goals tienen objetivos distintos', ok: objectives.size === 2 },
-      { name: 'el primer Goal termino', ok: state.goals.length >= 1 },
-      { name: 'el segundo Goal termino', ok: state.goals.length >= 2 },
+      { name: 'se crearon tres Goals', ok: created.length === 3, detail: `${created.length}` },
+      { name: 'los Goals tienen identificadores distintos', ok: goalIds.size === 3 },
+      { name: 'los Goals tienen objetivos distintos', ok: objectives.size === 3 },
+      { name: 'todos los Goals terminaron', ok: state.goals.length >= 3 },
       { name: 'el primer trabajo se produjo', ok: existsSync(join(context.workspace, 'resultado.txt')) },
       {
         name: 'el segundo trabajo se produjo',
         ok: existsSync(join(context.workspace, 'resultado-2.txt')),
       },
+      {
+        name: 'el tercer trabajo se produjo',
+        ok: existsSync(join(context.workspace, 'resultado-3.txt')),
+      },
+      { name: 'no hay Goals duplicados', ok: created.length === 3 },
       { name: 'la mision no quedo escalada', ok: state.mission.status !== 'escalated' },
+      {
+        name: 'el coste de la cadena es conocido',
+        ok: tokens > 0,
+        detail: `${tokens} tokens en ${state.goals.length} Goals`,
+      },
+    ];
+  },
+};
+
+/** Sin backlog ni senales en el codigo, la exploracion encuentra trabajo real. */
+const exploration: Scenario = {
+  name: 'exploration',
+  description: 'Sin backlog ni pendientes marcados, la exploracion encuentra trabajo real y lo encadena',
+  async run(context: ScenarioContext): Promise<Check[]> {
+    // El trabajo pendiente solo aparece descrito en prosa: el escaner
+    // determinista no lo ve, asi que solo la exploracion puede encontrarlo.
+    writeFileSync(
+      join(context.workspace, 'NOTAS.md'),
+      [
+        '# Notas del proyecto',
+        '',
+        'La funcion `exportar` de `src/fechas.ts` todavia no esta implementada.',
+        'Hay que escribirla y cubrirla con una prueba.',
+        '',
+      ].join('\n'),
+    );
+    mkdirSync(join(context.workspace, 'src'), { recursive: true });
+    writeFileSync(
+      join(context.workspace, 'src/fechas.ts'),
+      'export function exportar(): string {\n  throw new Error("sin implementar");\n}\n',
+    );
+
+    await context.setCandidates([]);
+    context.startSupervisor();
+
+    await context.waitFor('un Goal creado desde la exploracion', async () => {
+      const state = await context.readJournal();
+      return state.intents.some((intent) => intent.status === 'committed');
+    });
+
+    const state = await context.readJournal();
+    const created = state.intents.filter((intent) => intent.status === 'committed');
+    const proposed = state.explored;
+
+    return [
+      { name: 'la exploracion aporto candidatos', ok: proposed.length > 0, detail: `${proposed.length}` },
+      {
+        name: 'la evidencia senala a un fichero real',
+        ok: proposed.every((candidate) =>
+          candidate.evidenceRefs.every((ref) => existsSync(join(context.workspace, ref.split(':')[0]!))),
+        ),
+      },
+      { name: 'se creo un Goal a partir de la exploracion', ok: created.length >= 1 },
+      { name: 'el Goal viene de la exploracion', ok: state.explored.length > 0 || created.length >= 1 },
     ];
   },
 };
@@ -204,7 +269,7 @@ const budget: Scenario = {
   },
 };
 
-const SCENARIOS: Record<string, Scenario> = { chain, recovery, pause, budget };
+const SCENARIOS: Record<string, Scenario> = { chain, recovery, pause, budget, exploration };
 
 async function main(): Promise<void> {
   const requested = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));

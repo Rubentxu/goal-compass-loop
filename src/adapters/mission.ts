@@ -15,11 +15,16 @@ export interface MissionConfig {
   defaultTokenBudget: number;
   totalTokenBudget: number | null;
   maxGoals: number | null;
+  stallTimeoutMs: number;
+  explorationEnabled: boolean;
+  explorationCooldownMs: number;
   allowRemoteWrite: boolean;
   backlog: Candidate[];
 }
 
 const DEFAULT_TOKEN_BUDGET = 120_000;
+const DEFAULT_STALL_TIMEOUT_MS = 45 * 60_000;
+const DEFAULT_EXPLORATION_COOLDOWN_MS = 30 * 60_000;
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
@@ -89,6 +94,15 @@ export function loadMissionConfig(path: string): MissionConfig {
     totalTokenBudget:
       typeof totalTokenBudgetRaw === 'number' && totalTokenBudgetRaw > 0 ? totalTokenBudgetRaw : null,
     maxGoals: typeof maxGoalsRaw === 'number' && maxGoalsRaw > 0 ? maxGoalsRaw : null,
+    stallTimeoutMs:
+      typeof c.stallTimeoutMs === 'number' && c.stallTimeoutMs > 0
+        ? c.stallTimeoutMs
+        : DEFAULT_STALL_TIMEOUT_MS,
+    explorationEnabled: c.explorationEnabled !== false,
+    explorationCooldownMs:
+      typeof c.explorationCooldownMs === 'number' && c.explorationCooldownMs > 0
+        ? c.explorationCooldownMs
+        : DEFAULT_EXPLORATION_COOLDOWN_MS,
     allowRemoteWrite: c.allowRemoteWrite === true,
     backlog: backlogRaw.map(parseCandidate),
   };
@@ -103,6 +117,9 @@ export function toMission(config: MissionConfig): Mission {
     defaultTokenBudget: config.defaultTokenBudget,
     totalTokenBudget: config.totalTokenBudget,
     maxGoals: config.maxGoals,
+    stallTimeoutMs: config.stallTimeoutMs,
+    explorationEnabled: config.explorationEnabled,
+    explorationCooldownMs: config.explorationCooldownMs,
     workspace: config.workspace,
     backlog: config.backlog,
     allowRemoteWrite: config.allowRemoteWrite,

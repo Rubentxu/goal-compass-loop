@@ -17,6 +17,7 @@ import { AcpGoalAdapter } from '../src/adapters/acp-goal.js';
 import { FileControlPort } from '../src/adapters/control.js';
 import { FileJournal } from '../src/adapters/journal.js';
 import { ComposedCandidatePort, MissionConfigCandidatePort, WorkspaceDiscovery } from '../src/adapters/candidates.js';
+import { SessionExploration } from '../src/adapters/exploration.js';
 import { WorkspaceEvidenceScanner } from '../src/adapters/discovery.js';
 import type { Candidate, Journal, Mission, MissionStatus } from '../src/core/types.js';
 import { Supervisor } from '../src/supervisor.js';
@@ -106,6 +107,9 @@ export async function runScenario(
           defaultTokenBudget: 120_000,
           totalTokenBudget: null,
           maxGoals: null,
+          stallTimeoutMs: 45 * 60_000,
+          explorationEnabled: true,
+          explorationCooldownMs: 30 * 60_000,
           allowRemoteWrite: false,
           backlog: candidates,
         },
@@ -127,12 +131,19 @@ export async function runScenario(
       defaultTokenBudget: 120_000,
       totalTokenBudget: null,
       maxGoals: null,
+      stallTimeoutMs: 45 * 60_000,
+      explorationEnabled: true,
+      explorationCooldownMs: 30 * 60_000,
       workspace,
       backlog: [],
       allowRemoteWrite: false,
     },
     goals: [],
     intents: [],
+    progress: undefined,
+    explored: [],
+    explorationStreak: 0,
+    lastExplorationAt: undefined,
     updatedAt: new Date().toISOString(),
   });
 
@@ -155,6 +166,7 @@ export async function runScenario(
         ]),
         journalPort: journal,
         controlPort: control,
+        explorationPort: new SessionExploration(adapter!, workspace),
         clock: { now: () => Date.now() },
         logger: log,
         pollIntervalMs: 3_000,

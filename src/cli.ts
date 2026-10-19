@@ -17,6 +17,7 @@ import { FileControlPort } from './adapters/control.js';
 import { FileJournal, journalPath } from './adapters/journal.js';
 import { loadMissionConfig, toMission } from './adapters/mission.js';
 import { ComposedCandidatePort, MissionConfigCandidatePort, WorkspaceDiscovery } from './adapters/candidates.js';
+import { SessionExploration } from './adapters/exploration.js';
 import type { Journal, MissionStatus } from './core/types.js';
 import { Supervisor } from './supervisor.js';
 
@@ -92,6 +93,10 @@ async function cmdInit(values: Options): Promise<void> {
     mission: toMission(config),
     goals: [],
     intents: [],
+    progress: undefined,
+    explored: [],
+    explorationStreak: 0,
+    lastExplorationAt: undefined,
     updatedAt: new Date().toISOString(),
   };
   await journal.saveAtomically(initial);
@@ -117,6 +122,9 @@ async function cmdRun(values: Options): Promise<void> {
   state.mission.defaultTokenBudget = config.defaultTokenBudget;
   state.mission.totalTokenBudget = config.totalTokenBudget;
   state.mission.maxGoals = config.maxGoals;
+  state.mission.stallTimeoutMs = config.stallTimeoutMs;
+  state.mission.explorationEnabled = config.explorationEnabled;
+  state.mission.explorationCooldownMs = config.explorationCooldownMs;
   state.mission.allowRemoteWrite = config.allowRemoteWrite;
   await journal.saveAtomically(state);
 
@@ -146,6 +154,7 @@ async function cmdRun(values: Options): Promise<void> {
     ]),
     journalPort: journal,
     controlPort: new FileControlPort(config.missionId),
+    explorationPort: new SessionExploration(adapter, config.workspace),
     clock: { now: () => Date.now() },
     logger,
     ...(optionalNumber(values, 'poll-ms') !== undefined

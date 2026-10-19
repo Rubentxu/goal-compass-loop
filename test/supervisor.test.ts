@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Supervisor } from '../src/supervisor.js';
 import type { Candidate, GoalState, Journal } from '../src/core/types.js';
-import type { CandidatePort, Clock, Logger } from '../src/ports.js';
+import type { CandidatePort, Clock, ExplorationPort, Logger } from '../src/ports.js';
 import {
   MemoryControl,
   MemoryGoalHost,
@@ -24,6 +24,16 @@ class StaticCandidates implements CandidatePort {
   }
 }
 
+/** Exploracion que devuelve siempre lo mismo y cuenta las consultas. */
+class FakeExploration implements ExplorationPort {
+  calls = 0;
+  constructor(private readonly proposals: Candidate[]) {}
+  async explore(): Promise<Candidate[]> {
+    this.calls += 1;
+    return this.proposals;
+  }
+}
+
 interface Harness {
   supervisor: Supervisor;
   host: MemoryGoalHost;
@@ -37,6 +47,7 @@ function build(
     journal?: MemoryJournal;
     candidates?: Candidate[];
     control?: MemoryControl;
+    explorationPort?: ExplorationPort;
     maxIterations?: number;
   } = {},
 ): Harness {
@@ -53,6 +64,7 @@ function build(
     pollIntervalMs: 1,
     parkedPollIntervalMs: 1,
     maxIterations: options.maxIterations ?? 1,
+    ...(options.explorationPort ? { explorationPort: options.explorationPort } : {}),
   });
   return { supervisor, host, journal, control };
 }
@@ -223,8 +235,92 @@ describe('supervisor · control del usuario', () => {
   });
 });
 
-describe('supervisor · presupuesto de la mision', () => {
-  it('deja la mision dormida cuando el presupuesto se agota', async () => {
+describe('supervisor · estancamiento', () => {
+  it('anota el avance del objetivo y lo vuelve a anotar cuando cambia', async () => {
+    const host = new MemoryGoalHost();
+    host.current = aGoal({ goalId: 'tg_lento', status: 'active', statusReason: null });
+    const { supervisor, journal } = build({ host, candidates: [aCandidate()] });
+
+    await supervisor.run();
+
+    const first = journal.state.progress;
+    expect(first?.goalId).toBe('tg_lento');
+
+    // El objetivo consume tokens: eso es avanzar, aunque el estado no cambie.
+    host.current = { ...host.current!, tokensUsed: 5_000 };
+    await supervisor.run();
+
+    expect(journal.state.progress?.signature).toContain('5000');
+    expect(journal.state.progress?.since).toBeGreaterThanOrEqual(first?.since ?? 0);
+  });
+
+  it('olvida el avance cuando ya no hay objetivo', async () => {
+    const host = new MemoryGoalHost();
+    host.current = aGoal({ goalId: 'tg_lento', status: 'active', statusReason: null });
+    const { supervisor, journal } = build({ host, candidates: [aCandidate()] });
+
+    await supervisor.run();
+    expect(journal.state.progress).toBeDefined();
+
+    host.current = null;
+    await supervisor.run();
+
+    expect(journal.state.progress).toBeUndefined();
+  });
+});
+
+describe('supervisor · exploracion acotada', () => {
+  it('pide una exploracion cuando no hay trabajo elegible y la mision continua', async () => {
+    const exploration = new FakeExploration([aCandidate({ candidateId: 'propuesta' })]);
+    const { supervisor, journal, host } = build({
+      candidates: [],
+      explorationPort: exploration,
+      maxIterations: 2,
+    });
+
+    await supervisor.run();
+
+    expect(exploration.calls).toBe(1);
+    expect(journal.state.explored).toHaveLength(1);
+    expect(journal.state.mission.status).toBe('running');
+    expect(host.createCount).toBe(1);
+  });
+
+  it('la mision sigue dormida si la exploracion no aporta nada', async () => {
+    const exploration = new FakeExploration([]);
+    const { supervisor, journal } = build({ candidates: [], explorationPort: exploration });
+
+    await supervisor.run();
+
+    expect(exploration.calls).toBe(1);
+    expect(journal.state.mission.status).toBe('parked');
+    expect(journal.state.explorationStreak).toBe(1);
+  });
+
+  it('respeta el enfriamiento: no pregunta otra vez enseguida', async () => {
+    const exploration = new FakeExploration([]);
+    const { supervisor, journal } = build({ candidates: [], explorationPort: exploration });
+
+    await supervisor.run();
+    await supervisor.run();
+
+    expect(exploration.calls).toBe(1);
+    expect(journal.state.explorationStreak).toBe(1);
+  });
+
+  it('no explora mientras hay un objetivo en marcha', async () => {
+    const host = new MemoryGoalHost();
+    host.current = aGoal({ goalId: 'tg_activo', status: 'active', statusReason: null });
+    const exploration = new FakeExploration([aCandidate()]);
+    const { supervisor } = build({ host, candidates: [], explorationPort: exploration });
+
+    await supervisor.run();
+
+    expect(exploration.calls).toBe(0);
+  });
+});
+
+describe('supervisor · presupuesto de la mision', () => {  it('deja la mision dormida cuando el presupuesto se agota', async () => {
     const mission = aMission({ totalTokenBudget: 1_000 });
     const journal = new MemoryJournal({
       ...anEmptyJournal(mission),

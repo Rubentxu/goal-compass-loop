@@ -27,7 +27,7 @@ import {
   type Snapshot,
   type TransitionIntent,
 } from './core/types.js';
-import type { CandidatePort, Clock, GoalPort, JournalPort, Logger } from './ports.js';
+import type { CandidatePort, Clock, ExplorationPort, GoalPort, JournalPort, Logger } from './ports.js';
 
 export interface SupervisorOptions {
   goalPort: GoalPort;
@@ -37,6 +37,8 @@ export interface SupervisorOptions {
   controlPort: { read(): Promise<Mission['status'] | null> };
   clock: Clock;
   logger: Logger;
+  /** Exploracion acotada cuando no hay trabajo elegible. */
+  explorationPort?: ExplorationPort;
   /** Intervalo de sondeo mientras se espera (ms). */
   pollIntervalMs?: number;
   /** Intervalo de sondeo en estado parked (ms). */
@@ -80,6 +82,7 @@ export class Supervisor {
   private readonly candidatePort: CandidatePort;
   private readonly journalPort: JournalPort;
   private readonly controlPort: SupervisorOptions['controlPort'];
+  private readonly explorationPort: ExplorationPort | undefined;
   private readonly clock: Clock;
   private readonly logger: Logger;
   private readonly pollIntervalMs: number;
@@ -94,6 +97,7 @@ export class Supervisor {
     this.candidatePort = options.candidatePort;
     this.journalPort = options.journalPort;
     this.controlPort = options.controlPort;
+    this.explorationPort = options.explorationPort;
     this.clock = options.clock;
     this.logger = options.logger;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_MS;
@@ -172,9 +176,35 @@ export class Supervisor {
     let goal = await this.goalPort.read(sessionId);
     goal = await this.applyControl(journal, goal);
     await this.syncCompletedGoal(journal, goal);
+    await this.trackProgress(journal, goal);
 
-    const candidates = await this.candidatePort.discover(journal.mission, goal);
+    const discovered = await this.candidatePort.discover(journal.mission, goal);
+    const candidates = [...discovered, ...journal.explored];
     return decide(this.buildSnapshot(journal, goal, candidates));
+  }
+
+  /**
+   * Anota el ultimo avance del Goal en curso.
+   *
+   * La firma cambia cuando el objetivo cambia de estado, de turno o de tokens
+   * consumidos. Mientras la firma no cambie, el objetivo esta estancado.
+   */
+  private async trackProgress(journal: Journal, goal: GoalState | null): Promise<void> {
+    if (!goal) {
+      if (journal.progress) {
+        journal.progress = undefined;
+        await this.saveJournal(journal);
+      }
+      return;
+    }
+
+    const signature = `${goal.status}|${goal.turnsUsed}|${goal.tokensUsed}`;
+    if (journal.progress?.goalId === goal.goalId && journal.progress.signature === signature) {
+      return;
+    }
+
+    journal.progress = { goalId: goal.goalId, signature, since: this.clock.now() };
+    await this.saveJournal(journal);
   }
 
   private buildSnapshot(
@@ -189,6 +219,7 @@ export class Supervisor {
       journal.goals.reduce((total, record) => total + record.tokensUsed, 0) +
       (goal && !recorded.has(goal.goalId) ? goal.tokensUsed : 0);
 
+    const progress = journal.progress;
     return {
       mission: journal.mission,
       goal,
@@ -203,6 +234,7 @@ export class Supervisor {
         .filter((key): key is string => typeof key === 'string'),
       goalsCreated: journal.intents.filter((intent) => intent.status === 'committed').length,
       tokensUsedTotal,
+      goalProgressSince: progress && progress.goalId === goal?.goalId ? progress.since : null,
       now: this.clock.now(),
     };
   }
@@ -260,9 +292,19 @@ export class Supervisor {
       receipt: goal.lastVerification?.reason?.slice(0, 200),
     };
     journal.goals.push(record);
+    this.pruneExplored(journal);
     await this.saveJournal(journal);
     this.logger.info(
       `goal completado registrado: ${goal.goalId} (${goal.statusReason ?? 'sin motivo'})`,
+    );
+  }
+
+  /** Descarta los candidatos explorados que ya se han resuelto. */
+  private pruneExplored(journal: Journal): void {
+    if (journal.explored.length === 0) return;
+    const done = new Set(journal.goals.map((record) => record.candidateKey));
+    journal.explored = journal.explored.filter(
+      (candidate) => !done.has(candidateKey(candidate)),
     );
   }
 
@@ -298,6 +340,9 @@ export class Supervisor {
     // La intencion se persiste antes de tocar el host: si el proceso muere
     // aqui, el reinicio sabra que hay que reconciliar.
     journal.intents.push(intent);
+    // Encadenar trabajo es novedad: la mision vuelve a estar en marcha.
+    journal.mission.status = 'running';
+    journal.mission.reason = undefined;
     await this.saveJournal(journal);
     this.logger.info(`intencion persistida: ${candidate.candidateId} -> ${intent.intentId}`);
 
@@ -372,7 +417,65 @@ export class Supervisor {
       await this.saveJournal(journal);
       this.logger.info(`mision en parked: ${reason}`);
     }
+    await this.tryExplore(journal);
     await this.wakeSignal.wait(this.parkedPollIntervalMs);
+  }
+
+  /**
+   * Pide una exploracion cuando no hay trabajo elegible, el objetivo esta
+   * quieto y ya se enfrio la ultima consulta.
+   *
+   * Es acotada por diseno: una sola consulta por enfriamiento, y lo que
+   * devuelve tiene que superar el filtro de candidatos. Si no aporta nada
+   * real, la mision sigue dormida.
+   */
+  private async tryExplore(journal: Journal): Promise<void> {
+    if (!this.explorationPort || !journal.mission.explorationEnabled) return;
+
+    const goal = await this.goalPort.read(this.goalPort.sessionId());
+    if (goal) return;
+
+    const now = this.clock.now();
+    const lastExploration = journal.lastExplorationAt ?? 0;
+    if (now - lastExploration < this.explorationWait(journal)) return;
+
+    journal.lastExplorationAt = now;
+    await this.saveJournal(journal);
+    this.logger.info('sin trabajo elegible: se pide una exploracion acotada del workspace');
+
+    let proposals: Candidate[];
+    try {
+      proposals = await this.explorationPort.explore(journal.mission, null);
+    } catch (err) {
+      this.logger.error(`la exploracion fallo: ${(err as Error).message}`);
+      return;
+    }
+
+    if (proposals.length === 0) {
+      // Cada exploracion vacia aleja la siguiente: preguntar una y otra vez
+      // lo mismo seria gastar sin obtener nada.
+      journal.explorationStreak = Math.min((journal.explorationStreak ?? 0) + 1, 6);
+      await this.saveJournal(journal);
+      this.logger.info(
+        `la exploracion no aporto trabajo real: la siguiente esperara ${Math.round(
+          this.explorationWait(journal) / 60_000,
+        )} minuto(s)`,
+      );
+      return;
+    }
+
+    journal.explored.push(...proposals);
+    journal.explorationStreak = 0;
+    journal.mission.status = 'running';
+    journal.mission.reason = undefined;
+    await this.saveJournal(journal);
+    this.logger.info(`la exploracion aporto ${proposals.length} candidato(s): la mision continua`);
+  }
+
+  /** Espera antes de la siguiente exploracion: crece con las exploraciones vacias. */
+  private explorationWait(journal: Journal): number {
+    const factor = 2 ** Math.max(0, (journal.explorationStreak ?? 0) - 1);
+    return journal.mission.explorationCooldownMs * factor;
   }
 
   /** El Goal sigue vivo o el host impone un limite: solo esperar. */

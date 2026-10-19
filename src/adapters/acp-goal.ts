@@ -56,6 +56,8 @@ export class AcpGoalAdapter implements GoalPort {
   private readonly options: AcpGoalOptions;
   private closed = false;
   private connecting: Promise<void> | null = null;
+  private capturing = false;
+  private capturedText = '';
 
   constructor(options: AcpGoalOptions) {
     this.options = options;
@@ -107,8 +109,8 @@ export class AcpGoalAdapter implements GoalPort {
     const input = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
 
     const toClient = (_agent: Agent): Client => ({
-      sessionUpdate: async () => {
-        /* el detalle del trabajo se refleja en el propio Goal */
+      sessionUpdate: async (params) => {
+        this.capture(params);
       },
       requestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
       extNotification: async (method: string, params: Record<string, unknown>) => {
@@ -179,6 +181,37 @@ export class AcpGoalAdapter implements GoalPort {
   sessionId(): string {
     if (!this.activeSessionId) throw new Error('la sesion ACP no esta iniciada');
     return this.activeSessionId;
+  }
+
+  /**
+   * Hace una pregunta al agente de la sesion y devuelve su respuesta en texto.
+   * Solo se usa con la sesion quieta: si hay un Goal en marcha, sus mensajes
+   * se mezclarian con la respuesta.
+   */
+  async ask(question: string): Promise<string> {
+    await this.ensureHost();
+    this.capturedText = '';
+    this.capturing = true;
+    try {
+      await this.requireConn().prompt({
+        sessionId: this.sessionId(),
+        prompt: [{ type: 'text', text: question }],
+      });
+    } finally {
+      this.capturing = false;
+    }
+    return this.capturedText;
+  }
+
+  /** Recoge el texto que el agente va emitiendo mientras se le pregunta. */
+  private capture(params: { update?: unknown }): void {
+    if (!this.capturing) return;
+    const update = params.update as
+      | { sessionUpdate?: string; content?: { type?: string; text?: string } }
+      | undefined;
+    if (update?.sessionUpdate !== 'agent_message_chunk') return;
+    if (update.content?.type !== 'text') return;
+    this.capturedText += update.content.text ?? '';
   }
 
   async read(sessionId: string): Promise<GoalState | null> {

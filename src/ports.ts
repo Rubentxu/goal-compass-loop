@@ -28,6 +28,20 @@ export interface CandidatePort {
   discover(mission: Mission, previousGoal: GoalState | null): Promise<Candidate[]>;
 }
 
+/**
+ * Exploracion acotada: se consulta al agente del host por trabajo que las
+ * fuentes deterministas no ven. Lo que devuelve pasa el mismo filtro que el
+ * resto de candidatos, y solo se admite si su evidencia es real.
+ */
+export interface ExplorationPort {
+  explore(mission: Mission, previousGoal: GoalState | null): Promise<Candidate[]>;
+}
+
+/** Sesion de texto con la que preguntar al agente del host. */
+export interface TextSession {
+  ask(question: string): Promise<string>;
+}
+
 export interface JournalPort {
   load(): Promise<Journal | null>;
   saveAtomically(journal: Journal): Promise<void>;

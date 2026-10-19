@@ -55,6 +55,15 @@ export function decide(snapshot: Snapshot): Decision {
     };
   }
 
+  if (goal && goal.status !== 'complete' && isStalled(snapshot)) {
+    return {
+      kind: 'park',
+      reason:
+        `el objetivo ${goal.goalId} lleva ${describeStall(snapshot)} en estado ${goal.status} sin avanzar; ` +
+        'la mision sigue viva y espera a que alguien lo revise',
+    };
+  }
+
   if (goal && NON_SUCCESS_GOAL_STATUSES.includes(goal.status)) {
     const reason = goal.statusReason ? ` (${goal.statusReason})` : '';
     return {
@@ -108,6 +117,27 @@ export function decide(snapshot: Snapshot): Decision {
     candidate: best,
     reason: best.whyNow || `candidato elegido por prioridad (${best.priority})`,
   };
+}
+
+/**
+ * El Goal esta estancado cuando lleva demasiado tiempo sin avanzar de verdad.
+ *
+ * "Avanzar" significa cambiar de estado, de turno o de tokens consumidos: un
+ * objetivo que sigue trabajando no esta estancado por el mero paso del tiempo.
+ */
+function isStalled(snapshot: Snapshot): boolean {
+  if (snapshot.goalProgressSince === null) return false;
+  return snapshot.now - snapshot.goalProgressSince > snapshot.mission.stallTimeoutMs;
+}
+
+/** Cuanto tiempo lleva el objetivo sin avanzar, en texto legible. */
+function describeStall(snapshot: Snapshot): string {
+  const elapsed = snapshot.now - (snapshot.goalProgressSince ?? snapshot.now);
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return 'unos segundos';
+  if (minutes < 60) return `${minutes} minuto(s)`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} hora(s)`;
 }
 
 /**
