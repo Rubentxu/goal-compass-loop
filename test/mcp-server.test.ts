@@ -90,6 +90,7 @@ describe('servidor de herramientas de la mision', () => {
       tools,
     )) as { tools: { name: string }[] };
     expect(list.tools.map((tool) => tool.name).sort()).toEqual([
+      'mission_declare',
       'mission_pause',
       'mission_propose',
       'mission_resume',
@@ -108,6 +109,46 @@ describe('servidor de herramientas de la mision', () => {
     const tools = buildMissionTools({ cwd: tempDir('gcl-mcp-sin-'), logger: quietLogger });
     const text = await callTool(tools, 'mission_status');
     expect(text).toContain('No hay ninguna misión declarada');
+  });
+
+  it('declara la mision que no existia', async () => {
+    const vacio = tempDir('gcl-mcp-declarar-');
+    const tools = buildMissionTools({ cwd: vacio, logger: quietLogger });
+
+    const text = await callTool(tools, 'mission_declare', {
+      objective: 'Mejorar el proyecto paso a paso',
+    });
+
+    expect(text).toContain('Misión declarada');
+    expect(existsSync(join(vacio, 'goal-compass.json'))).toBe(true);
+    expect(existsSync(join(vacio, '.goal-compass'))).toBe(true);
+
+    // Y a partir de ahi la mision se ve con las demas herramientas.
+    const estado = await callTool(tools, 'mission_status');
+    expect(estado).toContain('Mejorar el proyecto paso a paso');
+  });
+
+  it('declarar dos veces no pisa la declaracion que ya estaba', async () => {
+    const vacio = tempDir('gcl-mcp-declarar-');
+    const tools = buildMissionTools({ cwd: vacio, logger: quietLogger });
+
+    await callTool(tools, 'mission_declare', { objective: 'el primer objetivo' });
+    const antes = readFileSync(join(vacio, 'goal-compass.json'), 'utf8');
+
+    const texto = await callTool(tools, 'mission_declare', { objective: 'otro objetivo' });
+
+    expect(texto).toContain('no se ha tocado');
+    expect(readFileSync(join(vacio, 'goal-compass.json'), 'utf8')).toBe(antes);
+  });
+
+  it('no declara una mision sin objetivo', async () => {
+    const vacio = tempDir('gcl-mcp-declarar-');
+    const tools = buildMissionTools({ cwd: vacio, logger: quietLogger });
+
+    const text = await callTool(tools, 'mission_declare', {});
+
+    expect(text).toContain('Falta el objetivo');
+    expect(existsSync(join(vacio, 'goal-compass.json'))).toBe(false);
   });
 
   it('muestra la mision declarada y el trabajo disponible', async () => {
