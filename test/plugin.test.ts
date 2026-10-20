@@ -24,7 +24,7 @@ function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-function writeMission(workspace: string, allowRemoteWrite = false): void {
+function writeMission(workspace: string, allowRemoteWrite = false, driver?: string): void {
   writeFileSync(
     join(workspace, 'goal-compass.json'),
     JSON.stringify(
@@ -33,6 +33,7 @@ function writeMission(workspace: string, allowRemoteWrite = false): void {
         objective: 'Encadenar un objetivo desde el hook',
         defaultTokenBudget: 60000,
         allowRemoteWrite,
+        ...(driver ? { driver } : {}),
         backlog: [
           {
             candidateId: 'trabajo-1',
@@ -110,6 +111,16 @@ describe('hook de continuacion', () => {
     const decision = JSON.parse(salida) as { reason: string };
     expect(decision.reason).toContain('autoriza publicar');
     expect(decision.reason).toContain('autorizacion explicita del usuario');
+  });
+
+  it('no hace nada cuando la mision la conduce otro camino', async () => {
+    const otro = tempDir('gcl-hook-supervisor-');
+    writeMission(otro, false, 'supervisor');
+    const salida = await runAutoContinue(
+      JSON.stringify({ session_id: 'mvs_fake', cwd: otro }),
+      { host: HOST, logger: quietLogger },
+    );
+    expect(salida).toBe('');
   });
 
   it('no hace nada cuando el workspace no declara una mision', async () => {

@@ -58,6 +58,7 @@ function build(
     goalPort: host,
     candidatePort: new StaticCandidates(options.candidates ?? []),
     journalPort: journal,
+    chainLock: { acquire: () => () => {} },
     controlPort: control,
     clock: fixedClock,
     logger: silentLogger,
