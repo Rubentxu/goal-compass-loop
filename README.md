@@ -18,14 +18,22 @@ sistema entero sin jerga y cuenta qué se ha hecho en este ciclo.
 ## Qué aporta
 
 - **Continuidad real.** El objetivo se autoejecuta al crearlo; el supervisor
-  solo tiene que observar y encadenar.
+  solo tiene que observar y encadenar. Al terminar el turno del agente, el
+  hook encadena el siguiente objetivo e inyecta la continuación: el trabajo
+  sigue sin que nadie tenga que pedirlo.
+- **El hook siempre termina.** Si el host falla o no contesta, el hook se
+  rinde, cierra lo que ha arrancado y devuelve el control: el turno nunca se
+  queda colgado esperando.
 - **Descubrimiento con evidencia.** Los candidatos salen del backlog curado, de
   lo que el propio repositorio dice (pendientes marcados, pruebas omitidas) y,
   cuando no hay nada de eso, de una **exploración acotada** al agente del host.
   La evidencia tiene que señalar a un fichero que exista: sin eso, no hay
   trabajo.
-- **Freno de gasto.** Límite de tokens por objetivo y límite acumulado para la
-  misión completa. Al agotarse, la cadena se detiene sola.
+- **El presupuesto guía, no frena.** Cada objetivo recibe un presupuesto; si se
+  queda sin margen, ese mismo trabajo vuelve a la cola con el doble
+  (120k → 240k → 480k) hasta tres intentos. El total de la misión se mide y se
+  enseña, pero no detiene la cadena: una intención continuista necesita tokens
+  para cumplirse.
 - **Parada útil.** Pausar la misión pausa también el objetivo en curso: deja de
   consumir. Continuar lo reanuda.
 - **Sin silencios.** Un objetivo que deja de avanzar no deja la misión colgada
@@ -72,10 +80,14 @@ Cada vuelta del supervisor:
 | `complete` es la única puerta a otro objetivo | Decisión pura en `src/core/decide.ts` |
 | Notificación repetida no duplica | La autoridad es el **estado**, no el evento |
 | Caída entre `create` y `commit` no duplica | `intención` persistida + reconciliación con `get` |
-| `blocked`/`paused`/`budget_limited`/`usage_limited` no se esquivan | Espera; nunca se crea otro objetivo para eludir un límite |
+| `blocked`/`paused` no se esquivan | Espera; nunca se crea otro objetivo para eludir una decisión de alguien |
+| Un objetivo sin presupuesto no se pierde | El mismo trabajo vuelve a la cola con el doble de margen, hasta tres intentos |
+| El hook nunca deja el turno colgado | Tope de espera en toda petición al host, cierre del host y salida siempre |
 | Un objetivo que no avanza no cuelga la misión en silencio | Firma de progreso; al vencer el margen, la misión queda dormida con el motivo |
-| Agotado el presupuesto de la misión → `parked` | Contador acumulado de tokens en el núcleo |
+| El presupuesto de la misión es una medida | Se anota y se avisa al superarlo; la cadena sigue |
+| El presupuesto mide el gasto de la cadena, no el de tu sesión | Solo se cuentan los objetivos que la cadena creó |
 | Sin trabajo útil → `parked`, sin burn de tokens | Sondeo lento, sin llamadas al modelo |
+| El objetivo sabe de dónde sale y cómo se demuestra | La evidencia y el criterio de cierre viajan dentro del objetivo |
 | Deduplicación por intención, no por texto | Clave estable `objetivo + alcance + criterio` |
 | Un solo escritor por sesión | Un host, un supervisor |
 
@@ -224,8 +236,9 @@ El supervisor usa un `mission.json` **fuera del repositorio analizado**:
   consumo real va de 13 000 a 63 000 tokens, y la mayoría ronda los 63 000.
   Con 40 000 nunca llegó a completarse. 120 000 deja margen para un objetivo
   de un turno; si puede necesitar dos, conviene 200 000.
-- `totalTokenBudget` es el freno de la misión entera; al agotarse, la cadena
-  se detiene.
+- `totalTokenBudget` es la medida del gasto de la misión entera: al superarlo
+  queda anotado y se avisa, pero la cadena no se detiene. Para frenarla de
+  verdad, pausa la misión.
 - `stallTimeoutMs` es el margen sin avance antes de dar la misión por
   estancada (45 min por defecto). Un objetivo que sigue trabajando cambia de
   turnos o de tokens, así que no se marca por el mero paso del tiempo.

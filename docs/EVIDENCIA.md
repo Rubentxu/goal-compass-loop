@@ -1325,7 +1325,296 @@ identificador derivado, la declaración que no pisa, la que se puede escribir a
 mano, la que está a medio hacer, la que no es legible, el enlace simbólico que
 apunta al mismo sitio y el proyecto que ocupa el identificador de otro.
 
-## 10 · Lo que NO se ha ejecutado
+## 10 · Lo que se perdió entre el backlog y el agente
+
+### 10.1 El hueco, con la fuente primaria
+
+El backlog de la misión guarda, de cada candidato, su evidencia (el fichero
+que lo pide) y su criterio de cierre (cómo se sabrá que está hecho). Esa
+información se perdía en tres saltos:
+
+- `src/core/types.ts` — `TransitionIntent` guardaba `candidateId`,
+  `candidateKey`, `objective` y `tokenBudget`. Ni la evidencia ni el
+  criterio.
+- `src/supervisor.ts` — el objetivo se creaba con `candidate.objective` y el
+  presupuesto. Lo demás se quedaba en el candidato.
+- `src/plugin/auto-continue.ts` — la respuesta de continuación llevaba el
+  objetivo y el contexto de la misión, pero no la evidencia ni el criterio
+  del candidato que se estaba encadenando.
+
+La consecuencia con un roadmap es directa: el agente recibía «haz esto» sin
+«esto sale de aquí» ni «esto se demuestra así», y tenía que buscar la fuente
+en cada turno.
+
+### 10.2 Lo que exigía el contrato del host
+
+La primera intención fue llevar la evidencia por un canal propio. El host no
+tiene ese canal:
+
+- **El Goal se autoejecuta.** Su arranque solo lleva el texto del objetivo
+  (ADR-001). Nada más llega al worker: un archivo aparte no se abre solo.
+- **La extensión ACP solo acepta tres campos**: `{ sessionId, objective,
+  tokenBudget? }` (ADR-001). Los adjuntos que el host admite
+  (`attachments`, `objectiveResources`) no se pasan por esa vía: el manejador
+  de `goal/create` solo reenvía esos tres.
+- **El objetivo puede tener un tope de longitud** (`goal.objectiveMaxChars`,
+  configurable; sin tope por defecto), y pasarse devuelve
+  `GOAL_OBJECTIVE_TOO_LONG`.
+
+Si la evidencia tiene que llegar al worker, tiene que ir dentro del texto del
+objetivo. Y si va dentro, tiene que ir compacta.
+
+### 10.3 Lo que se hizo
+
+- **El objetivo se compone**: el texto del trabajo, la evidencia y el
+  criterio de cierre. Vive en `composeObjective`, que es pura y se prueba
+  sola.
+- **La intención guarda las dos cosas**: `evidenceRefs`, `doneWhen` y el
+  `hostObjective` que se le dio al host. El texto del trabajo se guarda
+  aparte (`objective`), para que se pueda leer y comparar sin el ruido.
+- **El historial del objetivo terminado** guarda la evidencia y el criterio.
+- **La respuesta de continuación** nombra el fichero de evidencia y el
+  criterio de cierre, junto al contexto de la misión.
+
+La reconciliación se tuvo que tocar con cuidado: compara el objetivo del host
+con el de la intención, y ahora son dos textos. Se comparan con el que
+recibió el host, con vuelta atrás para las intenciones antiguas.
+
+### 10.4 Las pruebas, y que muerden
+
+```text
+$ npx vitest run test/objective.test.ts test/supervisor.test.ts test/plugin.test.ts
+```
+
+Sin el cambio, nueve pruebas fallan:
+
+```text
+× lleva el trabajo, la evidencia y el criterio de cierre
+× enumera todos los ficheros de evidencia
+× enumera todos los criterios de cierre
+× no inventa evidencia ni criterio que no existen
+× empieza con el texto del trabajo, sin espacios de mas
+× el objetivo que recibe el host lleva la evidencia y el criterio de cierre
+× la intencion persistida guarda la evidencia y el criterio
+× el historial del objetivo terminado guarda la evidencia y el criterio
+× la continuacion nombra la evidencia y el criterio de cierre del objetivo
+```
+
+### 10.5 El defecto que salió al probarlo con el host de verdad
+
+Al encender la cadena sobre este mismo repositorio para ver el objetivo
+compuesto en el host, pasó algo que no estaba en el plan: el hook se apuntó
+a la sesión y **le cobró a la misión el gasto de un objetivo que la cadena no
+había creado**.
+
+```text
+[goal-compass] sesion reanudada: mvs_a37c5d35f49e44f695e808c2763193e9
+[goal-compass] goal completado registrado: tg_mg9ky0r1r8mvfo4f8m (complete(verifier_met))
+[goal-compass] decision: park - presupuesto de la mision agotado (2394829 de 600000 tokens)
+```
+
+El objetivo nativo que el usuario ya tenía en su sesión se contabilizó
+entero, y la misión quedó dormida por presupuesto agotado nada más declararla.
+Con un presupuesto normal, cualquier sesión que ya tenga un objetivo previo
+deja la misión muerta al instante, y el motivo no dice de dónde salió el
+gasto.
+
+El arreglo son dos filtros: un objetivo sin intención que lo cree no se
+registra en la misión, y el objetivo en curso solo suma si lo creó la cadena.
+La prueba que lo cubre falla sin el arreglo:
+
+```text
+AssertionError: expected [ { goalId: 'tg_ajeno', …(10) } ] to have a length of +0 but got 1
+```
+
+## 11 · El presupuesto como medida, no como muro
+
+### 11.1 Lo que pasaba
+
+Un objetivo que se quedaba sin presupuesto dejaba la cadena esperando para
+siempre. El trabajo a medias se perdía, y a los 45 minutos de estancamiento
+la misión entera se dormía con el motivo a la vista: el presupuesto se había
+acabado.
+
+El sistema lo daba por un límite y lo trataba como un límite: los estados
+`budget_limited` y `usage_limited` devolvían «espera», y la espera no la
+resolvía nadie.
+
+### 11.2 La regla nueva
+
+Agotar el presupuesto no dice nada del trabajo: solo dice que se le acabó el
+sitio. Así que el trabajo vuelve a la cola con el doble de margen, hasta tres
+intentos:
+
+```text
+el objetivo tg_1 se quedó sin presupuesto (51 633 de 3 000 tokens)
+   → el mismo trabajo se reintenta con 6 000
+   → si vuelve a quedarse corto, con 12 000
+   → al tercer intento, la misión espera a que alguien lo revise
+```
+
+Dos detalles que la hacen funcionar:
+
+- **Es el mismo trabajo.** La clave estable no cambia, así que el historial
+  enseña los intentos y su coste, y la evidencia y el criterio de cierre
+  siguen puestos.
+- **Hay que liberar el hueco.** El host guarda un solo objetivo por sesión, y
+  un objetivo que no ha terminado impide crear el siguiente: el agotado se
+  vacía antes de encadenar el reintento.
+
+Y el total de la misión deja de ser una puerta: se anota, se avisa cuando se
+supera y se enseña en la respuesta de continuación, pero la cadena sigue.
+
+### 11.3 La prueba contra el host real
+
+El escenario de aceptación deja el presupuesto del objetivo tan pequeño que
+el host lo agota, y comprueba que el trabajo vuelve a la cola:
+
+```text
+PASA · el intento agotado quedo anotado (1)
+PASA · el trabajo volvio a la cola (2 intento(s))
+PASA · el reintento lleva mas margen (3000 -> 6000)
+PASA · el gasto del intento agotado cuenta (51633 token(s))
+PASA · la mision no quedo escalada
+```
+
+Y el escenario del presupuesto de la misión, que antes exigía que la cadena se
+detuviera, ahora exige lo contrario:
+
+```text
+PASA · el presupuesto superado quedo anotado
+```
+
+### 11.4 Lo que muerde
+
+Nueve pruebas nuevas. Sin el cambio, la cadena se queda esperando:
+
+```text
+× reintenta el trabajo agotado con el doble de margen
+× no toca el objetivo que no es de la cadena
+× deja el trabajo para un humano cuando se agotan los intentos
+× el presupuesto de la mision superado se mide pero no detiene la cadena
+× libera el objetivo agotado y encadena el mismo trabajo con mas margen
+× el objetivo agotado que no es de la cadena no se toca
+× el trabajo vuelve a la cola con el doble de margen (contra el host real)
+```
+
+## 12 · El hook que no llegaba a tiempo
+
+### 12.1 El síntoma
+
+Un agente terminó su turno y la cadena no encadenó nada. El agente informaba
+de que la misión estaba viva, con candidatos pendientes y con el siguiente
+trabajo propuesto; nada de eso llegó a ejecutarse.
+
+La cadena no estaba dormida: el siguiente objetivo nunca se creó.
+
+### 12.2 La fuente primaria
+
+El registro del host lo dice sin rodeos:
+
+```text
+[13:32:14.237] WARN: [] Plugin hook command failed open
+  {"code":"HOOK_TIMEOUT","pluginName":"goal-compass",
+   "sourcePath":"hooks/auto-continue.json","event":"Stop"}
+```
+
+Ocho veces seguidas, a distinta hora, con dos códigos distintos
+(`HOOK_TIMEOUT` y `HOOK_ABORTED`). El hook se ejecutaba, fallaba y el host
+seguía como si el hook no hubiera dicho nada. Por eso el turno terminaba sin
+continuación: la salida del hook nunca llegó.
+
+### 12.3 Por qué fallaba
+
+El hook tiene que hacer dos cosas: crear el objetivo en la sesión del usuario
+y devolver la continuación. Medido contra el host real:
+
+| Paso | Coste |
+|---|---|
+| Arrancar el host ACP | 3,1 s |
+| Reanudar la sesión del usuario | 5,8 s |
+| Leer el objetivo | 3 ms |
+| Cerrar el host | 0,25 s |
+
+Son unos diez segundos de trabajo real. El hook se daba **9 segundos** de
+margen. El resultado era siempre el mismo: el hook se rendía a mitad, con el
+host ACP todavía en pie.
+
+Y ahí aparecía el segundo defecto: cuando el hook se rendía, no cerraba el
+host que había arrancado. El proceso se quedaba vivo, el host esperaba a su
+propio límite (120 s) y tiraba la salida. Reproducido con el hook instalado:
+
+```text
+[goal-compass] arrancando host ACP: mcode acp
+[goal-compass] extension de Goal verificada en el host
+[goal-compass] AVISO no se pudo encadenar el objetivo siguiente: ...
+real  2m10,007s
+```
+
+Dos minutos y diez segundos de turno perdido, y ni una palabra de
+continuación. El trabajo que el sistema había preparado se quedaba en el
+cajón.
+
+### 12.4 Lo que el host sí esperaba
+
+El contrato del host para el evento `Stop` es corto y el plugin ya lo cumplía:
+`{"decision": "block", "reason": "..."}` se convierte en la continuación que
+se inyecta al agente. El problema no era el formato: era el reloj.
+
+### 12.5 El arreglo
+
+- El margen del hook pasa a estar **por encima del trabajo real y por debajo
+  del límite del host** (45 s, con 120 s de margen en el host).
+- **Ninguna petición al host espera sin tope**: si el host no contesta, la
+  petición se rinde sola en lugar de dejar el turno colgado.
+- **El host ACP se cierra siempre**, también cuando la misión no llega a
+  arrancarse o cuando se agota el margen.
+- **El proceso del hook termina siempre**, después de escribir su salida.
+
+### 12.6 La prueba que lo cubre
+
+Dos pruebas de proceso, que ejecutan el hook como lo hace el host —un proceso
+aparte, con entrada y salida estándar— y comprueban que termina:
+
+```text
+× termina aunque el host falle, sin quedarse colgado   (sin el arreglo)
+× termina aunque el host no conteste                   (sin el arreglo)
+```
+
+Con el arreglo, las dos pasan en menos de veinte segundos. Antes, el proceso
+no terminaba nunca y la prueba moría de tiempo.
+
+### 12.7 La prueba contra la sesión real
+
+El hook, ejecutado contra la sesión de trabajo de verdad, sobre un objetivo
+que se había quedado sin presupuesto:
+
+```text
+[goal-compass] sesion reanudada: mvs_a37c5d35f49e44f695e808c2763193e9
+[goal-compass] AVISO objetivo tg_bwirib8nammvgk6ks8 sin presupuesto (131423 token(s))
+[goal-compass] decision: retry - el mismo trabajo se reintenta con 240000
+[goal-compass] objetivo liberado: se reintenta con 240000 token(s)
+[goal-compass] goal creado y confirmado: tg_agath2k9s0mvgmru9x (active)
+[goal-compass] objetivo encadenado: tg_agath2k9s0mvgmru9x
+real  0m10,800s
+```
+
+Y la salida que el host recibe:
+
+```json
+{"decision":"block","reason":"La mision continua: el objetivo se quedo sin
+presupuesto y este es el mismo trabajo reintentado con mas margen.
+Objetivo: Que la evidencia y el criterio de cierre del candidato encadenado
+lleguen al objetivo y a la respuesta de continuacion
+Evidencia: docs/roadmap.md#p1
+Criterio de cierre: ..."}
+```
+
+Diez segundos y ocho décimas, con la continuación dentro. La misma
+ejecución, antes del arreglo, tardaba dos minutos y diez segundos y no
+devolvía nada.
+
+## 13 · Lo que NO se ha ejecutado
 
 - **El plugin no se ha probado en la interfaz gráfica.** La validación se ha
   hecho con `mcode exec`, que es la misma ruta de hooks pero sin pantalla.

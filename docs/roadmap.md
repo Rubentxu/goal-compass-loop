@@ -17,11 +17,53 @@ que la cadena no había creado.
 
 ---
 
+<a id="p8"></a>
+
+## 8 · El presupuesto guía, no frena
+
+**Prioridad:** máxima · **Estado:** hecha y medida
+
+**El hueco.** Un objetivo que se quedaba sin presupuesto devolvía «espera» y
+la espera no la resolvía nadie: el trabajo a medias se perdía y, a los 45
+minutos, la misión se dormía. El presupuesto de la misión hacía lo mismo: al
+superarlo, la cadena se detenía.
+
+**Lo que se hizo.** Agotar el presupuesto es quedarse sin sitio, no
+equivocarse: el mismo trabajo vuelve a la cola con el doble de margen
+(120k → 240k → 480k), hasta tres intentos. El total de la misión se mide y se
+enseña, pero no detiene la cadena.
+
+**Condición de cierre.** Un objetivo agotado vuelve a la cola con más margen,
+el intento queda anotado con su coste, y un objetivo que no es de la cadena no
+se toca. Verificado contra el host real.
+
+<a id="p9"></a>
+
+## 9 · El hook da continuidad y llega a tiempo
+
+**Prioridad:** máxima · **Estado:** hecha y medida
+
+**El hueco.** Un agente terminaba su turno y la cadena no encadenaba nada. El
+hook se ejecutaba y fallaba: se daba 9 segundos de margen para un trabajo que
+necesita unos 10, y al rendirse dejaba el host ACP en pie, así que el proceso
+no terminaba nunca. El host esperaba a su propio límite y tiraba la
+continuación preparada. Cada turno perdía más de dos minutos.
+
+**Lo que se hizo.** El margen queda por encima del trabajo real y por debajo
+del límite del host; ninguna petición espera sin tope; el host ACP se cierra
+siempre; y el proceso del hook termina siempre después de escribir su salida.
+
+**Condición de cierre.** El hook, ejecutado como proceso, termina en menos de
+veinte segundos tanto si el host falla como si no contesta, y la continuación
+llega al agente.
+
+---
+
 <a id="p0"></a>
 
 ## 0 · El objetivo del usuario no se le cobra a la misión
 
-**Prioridad:** máxima · **Estado:** corregido, falta documentar y medir
+**Prioridad:** máxima · **Estado:** hecha y medida
 
 **El hueco.** El presupuesto de la misión mide el gasto de **la cadena**, pero
 se contaba el de cualquier objetivo que apareciera en la sesión. El objetivo
@@ -57,7 +99,7 @@ dónde salió el gasto.
 
 ## 1 · La evidencia y el criterio de cierre llegan al objetivo
 
-**Prioridad:** alta · **Desbloquea:** que el roadmap mande sobre el trabajo
+**Prioridad:** alta · **Estado:** hecha · **Desbloquea:** que el roadmap mande sobre el trabajo
 
 **El hueco.** El backlog de la misión guarda, de cada candidato, su evidencia
 (el fichero que lo pide) y su criterio de cierre (cómo se sabrá que está

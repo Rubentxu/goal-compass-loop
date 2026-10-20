@@ -537,6 +537,134 @@ hace que todo lo demás parezca que no funciona: el sistema está en su sitio,
 pero no tiene nada que hacer y calla. Un paso que se salta sin decir nada es
 peor que un paso que no existe, porque hace dudar de lo que sí funciona.
 
+### 3.16 El objetivo lleva su evidencia dentro
+
+El backlog sabe de dónde sale cada trabajo: el fichero que lo pide y cómo se
+sabrá que está hecho. Eso, sin embargo, se perdía antes de llegar al agente,
+que recibía un «haz esto» sin el «esto sale de aquí» ni el «esto se demuestra
+así».
+
+El sitio donde se perdía no era casual: **el objetivo se autoejecuta**, y su
+arranque solo lleva el texto del objetivo. No hay un canal aparte por el que
+mandarle un fichero al worker, y la extensión de objetivos del host solo
+acepta tres campos: la sesión, el objetivo y el presupuesto. Si la evidencia
+tiene que llegar a quien trabaja el objetivo, tiene que ir dentro del texto.
+
+Así que ahora el objetivo se compone:
+
+```text
+Corregir la pérdida de relaciones al indexar recursos
+
+Evidencia: docs/triage.md#terraform-edges
+Criterio de cierre:
+- La reproducción que fallaba ahora pasa
+- El parser adyacente no se rompe
+```
+
+Con eso, el worker sabe dónde está el problema y qué tiene que demostrar, sin
+tener que buscarlo. Y la misión lo guarda todo: la intención guarda la
+evidencia y el criterio, el historial de los objetivos terminados también, y
+la respuesta de continuación se los dice al agente.
+
+#### La lección
+
+**Un dato que se pierde a mitad de camino no es un dato que falta: es un dato
+que miente.** El backlog afirmaba que el trabajo estaba justificado; el
+objetivo que llegaba al worker no lo estaba. Cada paso que no transporta la
+información la deja de estar, aunque el sistema entero parezca completo.
+
+### 3.17 El presupuesto guía, no frena
+
+Había un momento en el que la cadena se quedaba quieta para siempre. Un objetivo
+se quedaba sin tokens a mitad de camino, y el sistema lo entendía como un
+«no»:
+
+```text
+el objetivo tg_1 se quedó sin presupuesto → esperar
+```
+
+Esperar era lo único que podía hacer, y esperando se quedaba. El trabajo a
+medias se perdía, la misión no avanzaba y, cuando el objetivo llevaba demasiado
+tiempo sin moverse, la misión entera se dormía con el motivo a la vista: el
+presupuesto se había acabado. Un límite que solo sabe parar no mide nada:
+decide, y además decide por ti.
+
+Ahora **quedarse sin presupuesto es quedarse sin sitio, no equivocarse**. La
+cadena hace lo que haría una persona que vuelve a la tarea con más margen:
+
+```text
+el objetivo tg_1 se quedó sin presupuesto (51 633 de 3 000 tokens)
+   → el mismo trabajo vuelve a la cola con 6 000 tokens
+   → si vuelve a quedarse corto, con 12 000
+   → al tercer intento, la misión espera a que alguien lo revise
+```
+
+Tres cosas hacen que esto funcione:
+
+- **El trabajo es el mismo.** No se busca otro candidato ni se inventa otro
+  texto: es el mismo objetivo, con su evidencia y su criterio de cierre, con más
+  margen. La clave estable del trabajo no cambia, así que el historial enseña
+  los tres intentos y su coste.
+- **Hay que liberar el hueco.** El host guarda un solo objetivo por sesión, y un
+  objetivo que no ha terminado impide crear el siguiente. Por eso, antes de
+  encadenar el reintento, se vacía el objetivo agotado.
+- **El total de la misión es una medida.** Se anota, se avisa cuando se supera y
+  se enseña en la respuesta de continuación, pero no detiene la cadena. Una
+  intención continuista necesita tokens para cumplirse: si el presupuesto frena
+  la intención, no la está guiando, la está apagando.
+
+Lo que sí detiene la cadena sigue siendo lo de siempre: que no quede trabajo
+que hacer, que el usuario pause o detenga la misión, o que un trabajo se agote
+tres veces seguidas. Los tres casos son decisiones, no medidas.
+
+#### La lección
+
+**Un presupuesto es una manera de mirar el gasto, no una puerta.** Cuando el
+presupuesto se convirtió en una puerta, dejó de ser una medida y pasó a ser una
+decisión automática que nadie había tomado. Medir es lo que permite seguir
+trabajando con los ojos abiertos: se sabe cuánto se ha gastado y se sigue.
+
+### 3.18 El hook que no llegaba a tiempo
+
+Hay otra forma de que la cadena no continúe, y no tiene nada que ver con los
+candidatos: **que el hook que la encadena no llegue a tiempo**.
+
+El cierre de turno del agente es el latido de la misión. Al terminar el turno,
+el host llama al hook del plugin, y el hook devuelve el texto que hace que el
+agente siga trabajando. Ese ida y vuelta es la continuidad.
+
+El hook, para hacer su trabajo, necesita dos cosas: crear el objetivo en la
+sesión del usuario y devolver la continuación. Lo primero no es gratis: hay que
+arrancar el host, hacer el apretón de manos y reanudar la sesión del usuario.
+Medido contra el host real, son unos diez segundos.
+
+El hook se daba nueve. Diez contra nueve: siempre perdía. Se rendía a mitad,
+y al rendirse dejaba el host que había arrancado en pie. Un proceso sin cerrar
+no termina, así que el hook no terminaba nunca, el host esperaba a su propio
+límite (dos minutos) y tiraba lo que el hook había preparado.
+
+El resultado era silencioso y confuso: el agente terminaba su turno y la
+cadena no encadenaba nada, sin que nadie supiera por qué. En el registro del
+host solo había una línea: `Plugin hook command failed open`.
+
+#### Lo que se cambió
+
+- El margen del hook queda **por encima del trabajo real y por debajo del
+  límite del host**: 45 segundos, con 120 de margen en el host.
+- **Ninguna petición al host espera sin tope.** Si el host no contesta, la
+  petición se rinde sola. Preguntar al agente al modelo sí tiene su propio
+  margen, más largo, porque eso es trabajo de verdad.
+- **El host se cierra siempre**, también cuando la misión no llega a
+  arrancarse.
+- **El proceso del hook termina siempre**, después de escribir su salida.
+
+#### La lección
+
+**Un hook que no termina no es un hook lento: es un hook que hace fallar al
+que lo espera.** Y un fallo silencioso es peor que un fallo ruidoso: el host
+tira la salida y sigue como si nada, así que el síntoma aparece donde no está
+la causa — en el agente que «no continúa», y no en el hook que no llegó.
+
 ## 4. Cómo se usa
 
 ### Con el plugin (lo recomendado)
