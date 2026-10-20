@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "goal-compass",
   "displayName": "Goal Compass",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Encadena objetivos nativos de MCode dentro de una mision continua: cuando el objetivo en curso termina, el plugin crea el siguiente en la misma sesion y devuelve el turno al agente para que siga trabajando.",
   "author": "Rubentxu",
   "icon": "icon.png",
