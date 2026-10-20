@@ -1239,7 +1239,46 @@ Lo único que no salió bien fue el apagado: MCode terminó el turno con
 desconectar, después de que el objetivo ya estuviera creado y confirmado; el
 journal y la transición quedaron íntegros.
 
-### 9.4 Lo que el cambio añadió al producto
+### 9.4 La vía completa, desde el prompt y sin tocar la terminal
+
+La prueba anterior daba por hecho que la declaración ya estaba. La siguiente
+no: el proyecto estaba **vacío**, sin `goal-compass.json` y sin nada preparado,
+y todo se pidió con una frase.
+
+```bash
+$ mcode exec "prepara la mision de este proyecto con el objetivo \
+    'dejar el repositorio con pruebas'" --cwd /tmp/gcl-prompt-declare --permission off
+```
+
+Lo que encontró el proyecto al terminar:
+
+```text
+goal-compass.json   ← la declaración, con el objetivo que se pidió
+.goal-compass/      ← el directorio de trabajo
+.gitignore           ← con la entrada de .goal-compass/
+README.md           ← con la misión anotada
+```
+
+Y lo que encontró el estado durable de la misión:
+
+```text
+"sessionId": "mvs_28d06796817f48c7aed28bf1ddcb1f5f",
+"driver": "plugin",
+"driverAt": 1792491855463,
+"intents": [("propuesta:Definir el stack de pruebas y dejar el arnés mínimo...", "committed", "tg_zds1eicp42mvgjbjjm")]
+```
+
+El recorrido entero, con un solo prompt:
+
+1. El agente declara la misión, con el objetivo que se le dio.
+2. El agente deja una **propuesta** con su evidencia y su criterio de cierre.
+3. Al cerrar el turno, el hook encuentra la declaración, toma el mando y
+   **encadena el objetivo** en esa misma sesión.
+
+No hubo ningún paso previo, ni un fichero preparado a mano, ni una orden en la
+terminal. Esa es la vía que se pidió, y funciona.
+
+### 9.5 Lo que el cambio añadió al producto
 
 - El comando `declare`, que deja el proyecto con su declaración, su directorio
   de trabajo y su entrada en `.gitignore`.
@@ -1249,7 +1288,7 @@ journal y la transición quedaron íntegros.
 - La detección del identificador ocupado: dos proyectos con el mismo
   identificador se dicen en vez de pisarse.
 
-### 9.5 La aceptación, después del cambio
+### 9.6 La aceptación, después del cambio
 
 ```text
 =============== RESUMEN ===============
