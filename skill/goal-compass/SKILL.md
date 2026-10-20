@@ -96,7 +96,7 @@ Un Goal nativo puede terminar en `complete` y **eso no termina la Mission**. El 
 
 **Tú no puedes y no debes crear Goals.** `create_goal` no está expuesto al modelo. Nunca simules esa creación ni afirmez que el siguiente Goal ya existe.
 
-Cuando el plugin está instalado, el supervisor es un **hook del cierre de turno**: en cuanto terminas, comprueba el Goal en curso y, si está terminado, crea el siguiente en esa misma sesión y te devuelve el turno. Si el hook no está operativo, indícalo con claridad al usuario: la continuación Goal→Goal **no** será automática.
+Cuando el plugin está instalado, el supervisor es un **hook del cierre de turno**: en cuanto terminas, comprueba el Goal en curso y, si está terminado, crea el siguiente en esa misma sesión. El host te lo entrega en un turno propio, con el objetivo, su evidencia y su criterio de cierre dentro: **el turno que sigue la cadena es ese, no el que acabas de cerrar**. Si el hook no está operativo, indícalo con claridad al usuario: la continuación Goal→Goal **no** será automática.
 
 Una Mission declara a veces **qué camino la conduce** (`"driver"` en su fichero de declaración): `"supervisor"` o `"plugin"`. Solo uno encadena; el otro se aparta entero, sin crear nada y sin tocar el estado de la Mission. Si `mission_status` dice quién conduce, tu turno no va a encadenar el siguiente Goal: lo hará ese camino. No lo esperes de tu cierre de turno ni lo pidas.
 
