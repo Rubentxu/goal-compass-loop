@@ -804,8 +804,9 @@ cierre, el contexto, el límite de publicación— viaja dentro del objetivo,
 que es lo único que el host lleva al agente cuando encadena un objetivo
 nuevo. Lo que queda fuera, no llega.
 
-La diferencia medida en una sesión real con un agente de verdad: **0 de 23
-resultados entregados antes, 112 de 112 después.**
+La diferencia medida en una sesión real con un agente de verdad: **23
+llamadas seguidas sin recibir nada antes, 10 de 11 con respuesta después** (la
+onceava falló por permisos, no por la cadena).
 
 ### 3.22 El proceso vivo que preguntaba a un host ocupado
 

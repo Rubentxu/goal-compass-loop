@@ -1837,9 +1837,14 @@ tenia forma de saberlo.
 
 | | Antes | Despues |
 |---|---|---|
-| Resultados entregados tras el encadenado | 0 de 23 | 112 de 112 |
-| Errores de entrega | 23 | 0 |
+| Llamadas con el resultado entregado | 0 | 10 de 11 |
+| Errores de entrega | 23 seguidos | 0 |
+| El otro error de las 11 | — | uno de permisos, ajeno a la cadena |
 | Tokens gastados en el objetivo | 51 585 | — |
+
+Las once llamadas son las del turno del objetivo, en la sesion real: el agente
+lejo su estado, comprobo el fichero byte a byte, propuso el trabajo siguiente
+y cerro el objetivo. Las diez veces que pregunto, recibio respuesta.
 
 ### 16.3 La causa, en el host
 
