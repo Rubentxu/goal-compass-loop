@@ -11,6 +11,46 @@ sistema), [EVIDENCIA.md](EVIDENCIA.md) (lo que ya está medido) e
 Las propuestas de esta lista nacieron de una lectura del código, no de una
 tormenta de ideas: cada una señala el fichero y la línea donde está el hueco.
 
+La primera se encontró encendiendo la cadena sobre este mismo repositorio:
+el hook se apuntó a la sesión y le cobró a la misión el gasto de un objetivo
+que la cadena no había creado.
+
+---
+
+<a id="p0"></a>
+
+## 0 · El objetivo del usuario no se le cobra a la misión
+
+**Prioridad:** máxima · **Estado:** corregido, falta documentar y medir
+
+**El hueco.** El presupuesto de la misión mide el gasto de **la cadena**, pero
+se contaba el de cualquier objetivo que apareciera en la sesión. El objetivo
+nativo que el usuario ya tiene en marcha es suyo, y su consumo no es de esta
+misión.
+
+El efecto no es teórico: al encender la cadena sobre este repositorio, el
+objetivo que ya estaba en la sesión se contabilizó entero y la misión quedó
+dormida por presupuesto agotado nada más declararla. Con un presupuesto
+normal, cualquier sesión que ya tenga un objetivo previo deja la misión
+muerta al instante, y el motivo dice «presupuesto agotado» sin decir de
+dónde salió el gasto.
+
+**Evidencia.**
+
+- `src/supervisor.ts` — al registrar un objetivo terminado se metía en el
+  historial de la misión aunque no tuviera intención que lo creara.
+- `src/supervisor.ts` — el objetivo en curso sumaba sus tokens al total
+  aunque tampoco lo creara la cadena.
+
+**Condición de cierre.**
+
+- Un objetivo sin intención que lo cree no se registra en la misión ni suma a
+  su presupuesto.
+- El objetivo que la cadena creó sí se cobra, y el freno sigue mordiendo.
+- Hay una prueba que falla sin el arreglo.
+
+**Alcance.** `src/supervisor.ts`, `test/supervisor.test.ts`.
+
 ---
 
 <a id="p1"></a>
@@ -195,9 +235,59 @@ y el razonamiento nuevo vive en el cuerpo de la documentación.
 
 | # | Propuesta | Prioridad | Depende de |
 |---|---|---|---|
+| 0 | El objetivo del usuario no se le cobra a la misión | máxima | — |
 | 1 | La evidencia y el criterio de cierre llegan al objetivo | alta | — |
 | 2 | El estado dice quién conduce y por qué no se encadenó | alta | — |
 | 3 | Un diagnóstico que dice si la cadena puede trabajar aquí | media-alta | 2 |
 | 4 | El proyecto puede partir del árbol sin escribirlo a mano | media | — |
 | 5 | El ejemplo de declaración está al día | baja | — |
 | 6 | Las dos decisiones que más cambiaron el producto tienen su ADR | media | — |
+
+---
+
+<a id="p7"></a>
+
+## 7 · El ciclo activo, a la vista
+
+**Prioridad:** media-alta · **Desbloquea:** que el usuario vea la cadena
+
+**El hueco.** La cadena trabaja y no se ve. El estado durable es un JSON en
+`~/.local/state/goal-compass/`, el hook escribe sus avisos en la salida de
+error y lo único que el agente ve es el texto de la continuación. Para saber
+qué está haciendo la misión ahora mismo —qué objetivo va, cuáles están
+hechos, cuánto queda, quién conduce— hay que ir a leer un fichero a mano.
+
+**Lo que se puede y lo que no.** Un plugin no dibuja panels: la interfaz del
+host es del host, y lo que un plugin aporta son herramientas, recursos,
+prompts, skills y hooks. Pero el host sí tiene superficies donde el progreso
+se ve:
+
+- la **lista de tareas** del modelo, que se ve en pantalla;
+- los **prompts** del servidor de herramientas, invocables con `/`;
+- los **recursos** del servidor de herramientas, que se pueden abrir.
+
+La vía real es una: que la cadena sabe decir, en texto, cómo va el ciclo; y
+que ese texto llegue a una de esas superficies.
+
+**Evidencia.**
+
+- `src/plugin/mcp-server.ts` — el estado devuelve texto plano con el estado y
+  el trabajo disponible, pero sin el objetivo en curso ni la cadena de
+  objetivos hechos y pendientes.
+- `src/plugin/auto-continue.ts` — la respuesta de continuación dice qué
+  objetivo toca, pero no qué se ha hecho ni qué queda por delante.
+- El manifiesto del plugin admite herramientas, recursos, prompts, skills y
+  hooks, y ninguna superficie de panel: no hay un punto de extensión para
+  dibujarlo.
+
+**Condición de cierre.**
+
+- Hay una vista del ciclo activo en texto: objetivo de la misión, objetivo en
+  curso con su evidencia, objetivos hechos y pendientes con su estado,
+  presupuesto consumido y total, y qué camino conduce la misión.
+- Esa vista se puede pedir desde la conversación y devolverse como recurso.
+- El agente la refleja en su lista de tareas, de modo que el progreso queda
+  a la vista sin que el usuario tenga que pedirlo.
+
+**Alcance.** `src/plugin/mcp-server.ts`, `src/plugin/auto-continue.ts`,
+`skill/goal-compass/SKILL.md`.
