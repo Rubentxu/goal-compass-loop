@@ -31,6 +31,8 @@ Un Goal nativo puede terminar en `complete` y **eso no termina la Mission**. El 
 
 Cuando el plugin está instalado, el supervisor es un **hook del cierre de turno**: en cuanto terminas, comprueba el Goal en curso y, si está terminado, crea el siguiente en esa misma sesión y te devuelve el turno. Si el hook no está operativo, indícalo con claridad al usuario: la continuación Goal→Goal **no** será automática.
 
+Una Mission declara a veces **qué camino la conduce** (`"driver"` en su fichero de declaración): `"supervisor"` o `"plugin"`. Solo uno encadena; el otro se aparta entero, sin crear nada y sin tocar el estado de la Mission. Si `mission_status` dice quién conduce, tu turno no va a encadenar el siguiente Goal: lo hará ese camino. No lo esperes de tu cierre de turno ni lo pidas.
+
 Los nodos `choose-next` y `await-work` son recursos de **planificación del supervisor**, no comandos ejecutables por el agente tras finalizar un Goal.
 
 ## La Mission por dentro
