@@ -12,6 +12,9 @@
  *   FAKE_ACP_SEED_GOAL=<estado>  el host arranca con un Goal ya creado
  *   FAKE_ACP_SEED_ID=<id>       identificador de ese Goal
  *   FAKE_ACP_SEED_BUDGET=<n>    presupuesto de ese Goal
+ *   FAKE_ACP_FREEZE_AFTER_MS=<ms>  a partir de ese momento, el host deja de
+ *                                   responder a nada: sirve para comprobar que
+ *                                   quien pregunta no depende de la respuesta
  */
 import { createInterface } from 'node:readline';
 
@@ -27,6 +30,8 @@ const goalStatus = process.env.FAKE_ACP_GOAL ?? 'complete';
 const seedStatus = process.env.FAKE_ACP_SEED_GOAL ?? '';
 const seedId = process.env.FAKE_ACP_SEED_ID ?? 'tg_fake_1';
 const seedBudget = Number(process.env.FAKE_ACP_SEED_BUDGET ?? 0);
+const freezeAfterMs = Number(process.env.FAKE_ACP_FREEZE_AFTER_MS ?? 0);
+const startedAt = Date.now();
 
 let counter = 0;
 const goals = new Map();
@@ -98,6 +103,10 @@ input.on('line', (line) => {
   }
 
   const { id, method, params } = message;
+
+  // El host se congela: deja de responder y no contesta ni con un error.
+  // Quien pregunte tiene que quedarse con lo que ya sabe.
+  if (freezeAfterMs > 0 && Date.now() - startedAt > freezeAfterMs) return;
 
   if (id !== undefined && method === 'session/request_permission') {
     send({ jsonrpc: '2.0', id, result: { outcome: { outcome: 'cancelled' } } });

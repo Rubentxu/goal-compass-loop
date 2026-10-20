@@ -19,6 +19,7 @@ import { mkdirSync, rmSync, realpathSync, appendFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AcpGoalAdapter } from '../adapters/acp-goal.js';
+import type { GoalState } from '../core/types.js';
 import { parseKeeperRequest, type KeeperRequest, type KeeperResponse } from './keeper-protocol.js';
 import type { Logger } from '../ports.js';
 
@@ -27,6 +28,16 @@ const WATCHDOG_INTERVAL_MS = 2_000;
 
 /** Cuantas veces se intenta cargar la sesion antes de rendirse. */
 const MAX_ATTEMPTS = 5;
+
+/**
+ * Tope de la pregunta al host cuando el proceso vivo todavia no sabe cual es
+ * el objetivo.
+ *
+ * El hook que pregunta corre mientras el host que tiene el objetivo esta
+ * ocupado: es el propio hook el que lo espera. Preguntar sin tope es lo que
+ * hace que el hook agote su margen y el turno termine sin continuacion.
+ */
+const GOAL_READ_TIMEOUT_MS = 400;
 
 /** Espera entre intentos de cargar la sesion. */
 const RETRY_DELAY_MS = 1_000;
@@ -65,12 +76,27 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
   let adapter: AcpGoalAdapter | undefined;
   let ready = false;
   let failure: string | undefined;
+  /**
+   * El ultimo estado del objetivo que se ha visto.
+   *
+   * `undefined` significa "todavia no se sabe"; `null` significa "no hay
+   * objetivo". La distincion importa: decir "no hay" cuando no se sabe puede
+   * crear un objetivo que ya existe.
+   */
+  let cachedGoal: GoalState | null | undefined;
 
   const build = (): AcpGoalAdapter =>
     new AcpGoalAdapter({
       workspace,
       sessionId,
       logger,
+      // El host avisa de cada cambio del objetivo. Ese aviso es lo que
+      // permite que el proceso vivo sepa cual es sin preguntar, y preguntar
+      // es lo que se queda colgado mientras el host esta ocupado.
+      onGoalUpdate: (event) => {
+        if (event.sessionId !== sessionId) return;
+        cachedGoal = event.goal ?? null;
+      },
       ...(options.host?.command !== undefined ? { command: options.host.command } : {}),
       ...(options.host?.args !== undefined ? { args: options.host.args } : {}),
     });
@@ -91,6 +117,9 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
         adapter = candidate;
         ready = true;
         failure = undefined;
+        // Aqui el host esta libre: es el momento de preguntar cual es el
+        // objetivo. A partir de aqui manda el aviso de cambio.
+        cachedGoal = await candidate.read(sessionId).catch(() => undefined);
         logger.info(`sesion cargada en el proceso vivo: ${sessionId}`);
         return;
       } catch (err) {
@@ -136,6 +165,10 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
       logger,
       isReady: () => ready,
       failure: () => failure,
+      goal: () => cachedGoal,
+      setGoal: (goal: GoalState | null | undefined) => {
+        cachedGoal = goal;
+      },
       shutdown,
     });
   });
@@ -182,6 +215,30 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
   await closed;
 }
 
+/**
+ * Promesa con tope.
+ *
+ * Si la promesa no llega a tiempo, se rinde: una espera sin tope deja el
+ * turno colgado, que es peor que no tener respuesta.
+ */
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`el host no respondio en ${ms}ms`)),
+          ms,
+        );
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** Espera un rato. */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -216,6 +273,10 @@ interface ConnectionContext {
   logger: Logger;
   isReady: () => boolean;
   failure: () => string | undefined;
+  /** El ultimo estado del objetivo conocido: `undefined` si aun no se sabe. */
+  goal: () => GoalState | null | undefined;
+  /** Guarda el estado del objetivo que acaba de preguntarse al host. */
+  setGoal: (goal: GoalState | null | undefined) => void;
   shutdown: () => Promise<void>;
 }
 
@@ -279,7 +340,7 @@ async function serve(request: KeeperRequest, context: ConnectionContext): Promis
     }
 
     const sessionId = context.sessionId;
-    const response = await serveOnHost(request, adapter, sessionId);
+    const response = await serveOnHost(request, adapter, sessionId, context);
     context.logger.info(`${request.action} atendido en ${Date.now() - started} ms`);
     return response;
   } catch (err) {
@@ -295,21 +356,57 @@ async function serveOnHost(
   request: KeeperRequest,
   adapter: AcpGoalAdapter,
   sessionId: string,
+  context: ConnectionContext,
 ): Promise<KeeperResponse> {
   switch (request.action) {
-    case 'read':
-      return { ok: true, goal: await adapter.read(sessionId) };
-    case 'create':
-      return {
-        ok: true,
-        goal: await adapter.create(sessionId, request.objective ?? '', request.tokenBudget),
-      };
-    case 'pause':
-      return { ok: true, goal: await adapter.pause(sessionId) };
-    case 'resume':
-      return { ok: true, goal: await adapter.resume(sessionId) };
-    case 'clear':
-      return { ok: true, cleared: await adapter.clear(sessionId) };
+    case 'read': {
+      // Preguntar al host y esperar es lo que hace que el hook agote su
+      // margen: mientras el hook corre, el host que tiene el objetivo esta
+      // ocupado esperando al hook. El proceso vivo ya sabe cual es el
+      // objetivo, asi que se responde con lo que sabe.
+      const cached = context.goal();
+      if (cached !== undefined) return { ok: true, goal: cached };
+      // Aun no se sabe: se pregunta, pero con un tope corto. Si el host no
+      // contesta, se responde con un error y no con "no hay objetivo": callar
+      // seria afirmar algo que no se sabe, y podria crear un objetivo que ya
+      // existe.
+      try {
+        const goal = await withTimeout(adapter.read(sessionId), GOAL_READ_TIMEOUT_MS);
+        context.setGoal(goal);
+        return { ok: true, goal };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    }
+    case 'create': {
+      const created = await adapter.create(
+        sessionId,
+        request.objective ?? '',
+        request.tokenBudget,
+      );
+      // El objetivo nuevo se guarda ya: el aviso de cambio llega despues, y
+      // hasta que llega, leer dariia el objetivo anterior. Un objetivo
+      // anterior que ya esta completo habilita encadenar otra vez.
+      context.setGoal(created);
+      return { ok: true, goal: created };
+    }
+    case 'pause': {
+      const paused = await adapter.pause(sessionId);
+      context.setGoal(paused);
+      return { ok: true, goal: paused };
+    }
+    case 'resume': {
+      const resumed = await adapter.resume(sessionId);
+      context.setGoal(resumed);
+      return { ok: true, goal: resumed };
+    }
+    case 'clear': {
+      const cleared = await adapter.clear(sessionId);
+      // Sin objetivo ya no hay nada que recordar: dejarlo seria decir que hay
+      // un objetivo que se puede volver a crear.
+      if (cleared) context.setGoal(null);
+      return { ok: true, cleared };
+    }
     default:
       return { ok: false, error: `peticion que no se entiende: ${request.action}` };
   }

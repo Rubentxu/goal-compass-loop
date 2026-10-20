@@ -11,6 +11,10 @@
  *    bloqueado se deja como esta.
  *  - Si algo falla, el turno continua igual. Un plugin nunca deja al
  *    usuario sin respuesta por un problema propio.
+ *  - El hook no devuelve texto para continuar el turno. El host ya entrega
+ *    el objetivo recien creado en un turno propio, y ahi el agente conserva
+ *    las herramientas. Cerrar el turno es lo que el host espera; alargar el
+ *    turno aqui es lo que se las quita.
  */
 import { realpathSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +25,7 @@ import { locateMission } from './mission-locator.js';
 import { keeperSocketPath } from './keeper-protocol.js';
 import { parseHookEvent, type HookEvent } from './hook-event.js';
 import type { GoalAdapter, Logger } from '../ports.js';
-import type { Journal, TransitionIntent } from '../core/types.js';
+import type { Journal } from '../core/types.js';
 
 export { parseHookEvent };
 export type { HookEvent };
@@ -118,6 +122,12 @@ export async function runAutoContinue(
         // Preguntar al modelo por trabajo consume tiempo y el turno tiene un
         // limite: la exploracion la hace el agente, no el hook.
         exploration: false,
+        // El objetivo es lo unico que el host entrega al agente cuando
+        // encadena un objetivo nuevo. Lo que el agente tiene que saber antes
+        // de empezar —como trabajar, que no puede hacer, donde esta la
+        // mision— viaja dentro del objetivo.
+        hostObjectiveAddon: (journal, info) =>
+          objectiveAddon(mission.config.allowRemoteWrite, journal, info.retried),
       });
 
       if (!runtime.driving) {
@@ -129,22 +139,11 @@ export async function runAutoContinue(
       if (!outcome.created) return '';
 
       log.info(`objetivo encadenado: ${outcome.created.goalId}`);
-      const state = await runtime.journal.load();
-      // La intencion del objetivo recien creado es la que sabe de donde sale
-      // el trabajo y como se demuestra.
-      const intent = state?.intents.find(
-        (entry) => entry.goalId === outcome.created?.goalId,
-      );
-      return JSON.stringify({
-        decision: 'block',
-        reason: continuePrompt(
-          intent?.objective ?? outcome.created.objective,
-          mission.config.allowRemoteWrite,
-          state,
-          intent,
-          outcome.decision.kind === 'retry',
-        ),
-      });
+      // El turno se cierra aqui sin decir nada. El host entrega el objetivo
+      // recien creado en un turno propio, y en ese turno el agente puede
+      // seguir usando sus herramientas: leer lo que una herramienta devuelve
+      // es la diferencia entre trabajar y trabajar a ciegas.
+      return '';
     } catch (err) {
       log.warn(`no se pudo encadenar el objetivo siguiente: ${(err as Error).message}`);
       return '';
@@ -211,84 +210,68 @@ async function connectKeeper(
 /**
  * Lo que el agente recibe para seguir trabajando.
  *
+ * Viaja dentro del objetivo, y no en un mensaje aparte, porque el objetivo es
+ * lo unico que el host lleva al agente cuando encadena un objetivo nuevo. Lo
+ * que queda fuera, no llega.
+ *
  * El limite de publicacion de la mision viaja aqui porque el agente es el
  * unico que puede hacer push, publicar o desplegar: si la mision no lo
  * autoriza, el agente tiene que saberlo antes de empezar.
  *
  * Y con el limite viaja el contexto, porque un objetivo sin contexto obliga a
- * rededucir el estado del proyecto en cada turno. La respuesta de continuacion
- * dice donde esta la mision ahora mismo: cuanto ha hecho, cuanto le queda y
- * que se esta trabajando.
- *
- * Con el contexto viaja la evidencia y el criterio de cierre del objetivo
- * que se encadena. Sin ellos, el agente tiene que volver a buscar de donde
- * sale el trabajo, y el criterio —que es lo que decide si el objetivo esta
- * demostrado— no le llega a quien tiene que demostrarlo.
+ * rededucir el estado del proyecto en cada turno. El objetivo dice donde esta
+ * la mision ahora mismo: cuanto ha hecho, cuanto le queda y que se esta
+ * trabajando.
  *
  * La ultima parte es la que cierra el bucle: al terminar, el agente deja el
  * trabajo siguiente propuesto. Sin eso, la cadena se queda sin fuel en cuanto
  * la cola se vacia, aunque la mision siga viva.
  */
-function continuePrompt(
-  objective: string,
+function objectiveAddon(
   allowRemoteWrite: boolean,
-  state: Journal | null,
-  intent?: TransitionIntent,
+  state: Journal,
   retried = false,
-): string {
+): string[] {
   const boundary = allowRemoteWrite
     ? 'La mision autoriza publicar, pero hace falta autorizacion explicita del usuario.'
     : 'La mision no autoriza publicar: no hagas push, ni tag, ni release, ni despliegue.';
-  const origin = retried
-    ? 'La mision continua: el objetivo se quedo sin presupuesto y este es el mismo trabajo reintentado con mas margen.\n'
-    : 'La mision continua: el objetivo siguiente ya esta creado y activo.\n';
-  return (
-    `${origin}` +
-    `Objetivo: ${objective}\n\n` +
-    `${evidenceOf(intent)}\n` +
-    `${contextOf(state)}\n` +
-    `Trabaja ese objetivo con la skill goal-compass: empieza por el nodo de ` +
-    `entrada del arbol, elige solo el nodo que corresponda y ejecuta una accion ` +
-    `pequena y verificable. Cuando su alcance este probado, cierralo con ` +
-    `update_goal(status=complete).\n\n` +
-    `Cuando termines, deja el trabajo siguiente: con mission_propose, la evidencia ` +
-    `que lo respalda y como se sabra que esta hecho. Si de verdad no hay trabajo ` +
-    `que quede, dilo con claridad en vez de inventarlo. La cadena sigue mientras ` +
-    `alguien deje trabajo.\n\n` +
-    `Limite de la mision: ${boundary}`
-  );
-}
-
-/**
- * De donde sale el trabajo que se encadena y como se sabra que esta hecho.
- *
- * Son dos datos que el backlog ya tenia y que se perdian antes de llegar al
- * agente. Aqui vuelven a estar, en el mismo sitio donde el agente lee que
- * tiene que trabajar.
- */
-function evidenceOf(intent: TransitionIntent | undefined): string {
-  const evidence = intent?.evidenceRefs ?? [];
-  const doneWhen = intent?.doneWhen ?? [];
-  if (evidence.length === 0 && doneWhen.length === 0) return '';
 
   const lines: string[] = [];
-  if (evidence.length > 0) lines.push(`Evidencia: ${evidence.join(', ')}`);
-  if (doneWhen.length > 0) {
-    lines.push('Criterio de cierre:');
-    for (const item of doneWhen) lines.push(`- ${item}`);
+
+  if (retried) {
+    lines.push(
+      'Este objetivo se quedo sin presupuesto la vez anterior: es el mismo trabajo ' +
+        'reintentado con mas margen. Lo que ya hiciste sigue en pie.',
+      '',
+    );
   }
-  return `${lines.join('\n')}\n\n`;
+
+  lines.push(
+    'Trabaja ese objetivo con la skill goal-compass: empieza por el nodo de ' +
+      'entrada del arbol, elige solo el nodo que corresponda y ejecuta una accion ' +
+      'pequena y verificable. Cuando su alcance este probado, cierralo con ' +
+      'update_goal(status=complete).',
+    '',
+    'Cuando termines, deja el trabajo siguiente: con mission_propose, la evidencia ' +
+      'que lo respalda y como se sabra que esta hecho. Si de verdad no hay trabajo ' +
+      'que quede, dilo con claridad en vez de inventarlo. La cadena sigue mientras ' +
+      'alguien deje trabajo.',
+    '',
+    contextOf(state),
+    '',
+    `Limite de la mision: ${boundary}`,
+  );
+
+  return lines;
 }
 
 /**
- * El estado de la mision en el momento de la continuacion.
+ * El estado de la mision en el momento de encadenar el objetivo.
  *
  * Es lo que el agente necesita para no empezar a ciegas: que se ha hecho, que
  * queda y por que la mision esta como esta.
  */
-function contextOf(state: Journal | null): string {
-  if (!state) return 'Contexto: la mision todavia no tiene historial.';
-
+function contextOf(state: Journal): string {
   const completed = state.goals.filter((goal) => goal.status === 'complete');
   const metrics = state.metrics;
   const tokens =
@@ -304,7 +287,7 @@ function contextOf(state: Journal | null): string {
     `- estado: ${state.mission.status}${state.mission.reason ? ` (${state.mission.reason})` : ''}`,
     `- objetivos completados: ${completed.length}` +
       (last ? `; el ultimo fue "${last.objective}"` : ''),
-    `- objetivos encadenados: ${chained}`,
+    `- objetivos encadenados antes de este: ${chained}`,
     `- presupuesto: ${tokens} token(s)${budget !== null ? ` de ${budget}` : ''}` +
       (metrics?.budgetExceeded ? ' (superado: la cadena sigue, el presupuesto es una medida)' : ''),
     `- trabajo declarado pendiente: ${state.mission.backlog.length} candidato(s)`,

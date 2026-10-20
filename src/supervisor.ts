@@ -60,6 +60,23 @@ export interface SupervisorOptions {
   maxIterations?: number;
   /** Fallos consecutivos tolerados antes de detener la cadena. */
   maxConsecutiveErrors?: number;
+  /**
+   * Texto que se anade al objetivo que recibe el host.
+   *
+   * El objetivo es lo unico que el host entrega al agente cuando encadena un
+   * objetivo nuevo, asi que lo que el agente tiene que saber —como trabajar,
+   * que no puede hacer, donde esta la mision— viaja aqui. Quien conduce la
+   * mision decide que es eso; el supervisor solo lo coloca.
+   */
+  hostObjectiveAddon?: (journal: Journal, info: HostObjectiveContext) => string[];
+}
+
+/** Lo que quien conduce la mision sabe del objetivo que se va a encadenar. */
+export interface HostObjectiveContext {
+  /** El trabajo que se encadena. */
+  candidate: Candidate;
+  /** Si es el mismo trabajo reintentado tras quedarse sin presupuesto. */
+  retried: boolean;
 }
 
 const DEFAULT_POLL_MS = 15_000;
@@ -110,6 +127,7 @@ export class Supervisor {
   private readonly parkedPollIntervalMs: number;
   private readonly maxIterations: number | undefined;
   private readonly maxConsecutiveErrors: number;
+  private readonly hostObjectiveAddon: SupervisorOptions['hostObjectiveAddon'];
   private readonly wakeSignal = new WakeSignal();
   private stopped = false;
 
@@ -126,6 +144,7 @@ export class Supervisor {
     this.parkedPollIntervalMs = options.parkedPollIntervalMs ?? DEFAULT_PARKED_POLL_MS;
     this.maxIterations = options.maxIterations;
     this.maxConsecutiveErrors = options.maxConsecutiveErrors ?? DEFAULT_MAX_CONSECUTIVE_ERRORS;
+    this.hostObjectiveAddon = options.hostObjectiveAddon;
   }
 
   /** Avisa al bucle: normalmente desde una notificacion de cambio de Goal. */
@@ -553,7 +572,7 @@ export class Supervisor {
       this.logger.info(
         `objetivo liberado: se reintenta "${candidate.objective}" con ${tokenBudget} token(s)`,
       );
-      return await this.createGoal(candidate, { tokenBudget, candidateKey });
+      return await this.createGoal(candidate, { tokenBudget, candidateKey, retried: true });
     } finally {
       release();
     }
@@ -562,7 +581,7 @@ export class Supervisor {
   /** Crea el objetivo: primero se comprueba que toca, luego se encadena. */
   private async createGoal(
     candidate: Candidate,
-    options: { tokenBudget?: number; candidateKey?: string } = {},
+    options: { tokenBudget?: number; candidateKey?: string; retried?: boolean } = {},
   ): Promise<GoalState | undefined> {
     const journal = await this.loadJournal();
     const sessionId = this.goalPort.sessionId();
@@ -580,7 +599,13 @@ export class Supervisor {
       options.tokenBudget ?? candidate.tokenBudget ?? journal.mission.defaultTokenBudget;
     // Al host se le da el objetivo con la evidencia y el criterio de cierre
     // dentro: el Goal se autoejecuta y su arranque solo lleva ese texto.
-    const hostObjective = composeObjective(candidate);
+    const hostObjective = composeObjective(
+      candidate,
+      this.hostObjectiveAddon?.(journal, {
+        candidate,
+        retried: options.retried === true,
+      }),
+    );
     const intent: TransitionIntent = {
       intentId: randomUUID(),
       candidateId: candidate.candidateId,

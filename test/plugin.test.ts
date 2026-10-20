@@ -127,6 +127,20 @@ describe('hook de continuacion', () => {
     else process.env.XDG_STATE_HOME = previousStateHome;
   });
 
+  /**
+   * El objetivo que el host recibio en el ultimo encadenado.
+   *
+   * Es la unica via por la que el agente lee lo que el plugin tiene que
+   * decirle: el host entrega el objetivo en un turno propio y no hay otro
+   * mensaje. Por eso las pruebas miran aqui y no la salida del hook.
+   */
+  function objetivoDelHost(): string {
+    const journal = JSON.parse(
+      readFileSync(join(stateHome, 'goal-compass', 'prueba-hook', 'journal.json'), 'utf8'),
+    ) as { intents: { hostObjective: string }[] };
+    return journal.intents[journal.intents.length - 1]?.hostObjective ?? '';
+  }
+
   it('encuentra la declaracion de la mision en el workspace', () => {
     expect(findMissionFile(workspace)).toBe(join(workspace, 'goal-compass.json'));
 
@@ -148,72 +162,71 @@ describe('hook de continuacion', () => {
   });
 
   it('el limite de publicacion de la mision llega al agente', async () => {
-    const salida = await runAutoContinue(
-      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
-      { host: HOST, logger: quietLogger },
-    );
-    const decision = JSON.parse(salida) as { reason: string };
-    expect(decision.reason).toContain('no autoriza publicar');
+    await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }), {
+      host: HOST,
+      logger: quietLogger,
+    });
+    expect(objetivoDelHost()).toContain('no autoriza publicar');
   });
 
-  it('la continuacion lleva el contexto de la mision', async () => {
-    const salida = await runAutoContinue(
-      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
-      { host: HOST, logger: quietLogger },
-    );
-    const decision = JSON.parse(salida) as { reason: string };
-    expect(decision.reason).toContain('Contexto de la mision');
-    expect(decision.reason).toContain('presupuesto');
-    expect(decision.reason).toContain('trabajo declarado pendiente');
+  it('el objetivo lleva el contexto de la mision', async () => {
+    await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }), {
+      host: HOST,
+      logger: quietLogger,
+    });
+    const objetivo = objetivoDelHost();
+    expect(objetivo).toContain('Contexto de la mision');
+    expect(objetivo).toContain('presupuesto');
+    expect(objetivo).toContain('trabajo declarado pendiente');
   });
 
-  it('la continuacion pide dejar el trabajo siguiente', async () => {
-    const salida = await runAutoContinue(
-      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
-      { host: HOST, logger: quietLogger },
-    );
-    const decision = JSON.parse(salida) as { reason: string };
-    expect(decision.reason).toContain('mission_propose');
-    expect(decision.reason).toContain('deja el trabajo siguiente');
+  it('el objetivo pide dejar el trabajo siguiente', async () => {
+    await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }), {
+      host: HOST,
+      logger: quietLogger,
+    });
+    const objetivo = objetivoDelHost();
+    expect(objetivo).toContain('mission_propose');
+    expect(objetivo).toContain('deja el trabajo siguiente');
   });
 
-  it('la continuacion nombra la evidencia y el criterio de cierre del objetivo', async () => {    const salida = await runAutoContinue(
-      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
-      { host: HOST, logger: quietLogger },
-    );
-    const decision = JSON.parse(salida) as { reason: string };
-    expect(decision.reason).toContain('Evidencia: NOTAS.md');
-    expect(decision.reason).toContain('Criterio de cierre:');
-    expect(decision.reason).toContain('Las notas estan revisadas');
+  it('el objetivo nombra la evidencia y el criterio de cierre', async () => {
+    await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }), {
+      host: HOST,
+      logger: quietLogger,
+    });
+    const objetivo = objetivoDelHost();
+    expect(objetivo).toContain('Evidencia: NOTAS.md');
+    expect(objetivo).toContain('Criterio de cierre:');
+    expect(objetivo).toContain('Las notas estan revisadas');
   });
 
   it('el objetivo sin presupuesto se reintenta con mas margen en vez de quedarse esperando', async () => {
     // El primer turno encadena el objetivo.
-    const primera = await runAutoContinue(
-      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
-      { host: HOST, logger: quietLogger },
-    );
-    expect(JSON.parse(primera).reason).toContain('Objetivo:');
+    await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }), {
+      host: HOST,
+      logger: quietLogger,
+    });
+    expect(objetivoDelHost()).toContain('Revisar el fichero de notas');
 
     // El host devuelve ese mismo objetivo, ya sin presupuesto.
     process.env.FAKE_ACP_SEED_GOAL = 'budget_limited';
     process.env.FAKE_ACP_SEED_ID = 'tg_fake_1';
     process.env.FAKE_ACP_SEED_BUDGET = '60000';
-    let salida: string;
     try {
-      salida = await runAutoContinue(
-        JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
-        { host: HOST, logger: quietLogger },
-      );
+      await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }), {
+        host: HOST,
+        logger: quietLogger,
+      });
     } finally {
       delete process.env.FAKE_ACP_SEED_GOAL;
       delete process.env.FAKE_ACP_SEED_ID;
       delete process.env.FAKE_ACP_SEED_BUDGET;
     }
 
-    const decision = JSON.parse(salida) as { reason: string };
-    expect(decision.reason).toContain('se quedo sin presupuesto');
-    expect(decision.reason).toContain('reintentado con mas margen');
+    const objetivo = objetivoDelHost();
+    expect(objetivo).toContain('se quedo sin presupuesto');
+    expect(objetivo).toContain('reintentado con mas margen');
 
     // El trabajo vuelve a la cola con el doble de presupuesto, y el intento
     // agotado queda anotado con su coste.
@@ -231,13 +244,13 @@ describe('hook de continuacion', () => {
   it('una mision que autoriza publicar lo dice sin dar permiso por su cuenta', async () => {
     const otro = tempDir('gcl-hook-publica-');
     writeMission(otro, true);
-    const salida = await runAutoContinue(
-      JSON.stringify({ session_id: 'mvs_fake', cwd: otro }),
-      { host: HOST, logger: quietLogger },
-    );
-    const decision = JSON.parse(salida) as { reason: string };
-    expect(decision.reason).toContain('autoriza publicar');
-    expect(decision.reason).toContain('autorizacion explicita del usuario');
+    await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: otro }), {
+      host: HOST,
+      logger: quietLogger,
+    });
+    const objetivo = objetivoDelHost();
+    expect(objetivo).toContain('autoriza publicar');
+    expect(objetivo).toContain('autorizacion explicita del usuario');
   });
 
   it('no hace nada cuando la mision la conduce otro camino', async () => {
@@ -259,24 +272,29 @@ describe('hook de continuacion', () => {
     expect(salida).toBe('');
   });
 
-  it('crea el siguiente objetivo en la sesion del evento y pide continuar', async () => {
+  it('crea el siguiente objetivo en la sesion del evento y deja el turno al host', async () => {
     const salida = await runAutoContinue(
       JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
       { host: HOST, logger: quietLogger },
     );
 
-    expect(salida).not.toBe('');
-    const decision = JSON.parse(salida) as { decision: string; reason: string };
-    expect(decision.decision).toBe('block');
-    expect(decision.reason).toContain('Revisar el fichero de notas');
+    // El hook no alarga el turno. El host cierra el turno y entrega el
+    // objetivo recien creado en un turno propio, y en ese turno el agente
+    // sigue teniendo herramientas: alargar el turno aqui es lo que se las
+    // quita, porque el host ya no puede entregarles el resultado.
+    expect(salida).toBe('');
 
     const journal = JSON.parse(
       readFileSync(join(stateHome, 'goal-compass', 'prueba-hook', 'journal.json'), 'utf8'),
-    ) as { sessionId: string; intents: { status: string; goalId?: string }[] };
+    ) as {
+      sessionId: string;
+      intents: { status: string; goalId?: string; hostObjective: string }[];
+    };
     expect(journal.sessionId).toBe('mvs_fake');
     expect(journal.intents).toHaveLength(1);
     expect(journal.intents[0]?.status).toBe('committed');
     expect(journal.intents[0]?.goalId).toBeTruthy();
+    expect(journal.intents[0]?.hostObjective).toContain('Revisar el fichero de notas');
   });
 
   it('no rompe el turno cuando el host falla', async () => {

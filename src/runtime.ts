@@ -22,7 +22,7 @@ import { ChainLock, decideDriving } from './adapters/ownership.js';
 import { ProposalCandidatePort } from './adapters/proposals.js';
 import { emptyMetrics, normalizeJournal, type Driver, type Journal } from './core/types.js';
 import type { CandidatePort, GoalAdapter, Logger } from './ports.js';
-import { Supervisor } from './supervisor.js';
+import { Supervisor, type HostObjectiveContext } from './supervisor.js';
 
 export interface MissionRuntimeOptions {
   /** Configuracion de la mision ya leida. */
@@ -46,6 +46,13 @@ export interface MissionRuntimeOptions {
    * arrancarse.
    */
   adapter?: GoalAdapter;
+  /**
+   * Texto que se anade al objetivo que recibe el host.
+   *
+   * El objetivo es lo unico que el host entrega al agente cuando encadena un
+   * objetivo nuevo: lo que no viaje aqui, no llega.
+   */
+  hostObjectiveAddon?: (journal: Journal, info: HostObjectiveContext) => string[];
 }
 
 export interface MissionRuntime {
@@ -193,6 +200,9 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
     logger,
     ...(options.pollIntervalMs !== undefined ? { pollIntervalMs: options.pollIntervalMs } : {}),
     ...(options.maxIterations !== undefined ? { maxIterations: options.maxIterations } : {}),
+    ...(options.hostObjectiveAddon !== undefined
+      ? { hostObjectiveAddon: options.hostObjectiveAddon }
+      : {}),
   });
 
   // El camino que no conduce se aparta entero: no abre el host, no escribe en

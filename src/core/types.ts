@@ -374,8 +374,13 @@ export function normalizeJournal(journal: Journal): Journal {
  *
  * El texto se mantiene compacto: el host puede imponer un tope de longitud
  * al objetivo, y un trabajo que no se puede crear no avanza.
+ *
+ * `extra` anade al final lo que quien conduce la mision quiere que el agente
+ * sepa: como trabajar, que no puede hacer y donde esta la mision. Va aqui
+ * porque el objetivo es lo unico que el host entrega al agente cuando
+ * encadena un objetivo nuevo.
  */
-export function composeObjective(candidate: Candidate): string {
+export function composeObjective(candidate: Candidate, extra?: readonly string[]): string {
   const lines = [candidate.objective.trim()];
 
   if (candidate.evidenceRefs.length > 0) {
@@ -385,6 +390,10 @@ export function composeObjective(candidate: Candidate): string {
   if (candidate.doneWhen.length > 0) {
     lines.push('Criterio de cierre:');
     for (const item of candidate.doneWhen) lines.push(`- ${item}`);
+  }
+
+  if (extra && extra.length > 0) {
+    lines.push('', ...extra);
   }
 
   return lines.join('\n');

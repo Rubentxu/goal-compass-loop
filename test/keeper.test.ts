@@ -87,7 +87,7 @@ describe('proceso vivo', () => {
   });
 
   /** Levanta el proceso vivo con el host de mentira. */
-  function startKeeper(sessionId: string): string {
+  function startKeeper(sessionId: string, extraEnv: Record<string, string> = {}): string {
     const socketPath = keeperSocketPath(sessionId);
     keeper = spawn(
       TSX,
@@ -108,7 +108,7 @@ describe('proceso vivo', () => {
       ],
       {
         cwd: process.cwd(),
-        env: { ...process.env, XDG_STATE_HOME: stateHome },
+        env: { ...process.env, XDG_STATE_HOME: stateHome, ...extraEnv },
         stdio: 'ignore',
       },
     );
@@ -150,6 +150,69 @@ describe('proceso vivo', () => {
     await adapter.close();
   });
 
+  it('responde el objetivo sin preguntar a un host que ya no contesta', async () => {
+    // El caso que rompe la cadena: mientras el hook corre, el host que tiene
+    // el objetivo esta ocupado. Preguntarle y esperar deja el turno sin
+    // continuacion. El proceso vivo tiene que responder con lo que ya sabe.
+    const sessionId = 'mvs_vivo';
+    const socketPath = startKeeper(sessionId, {
+      FAKE_ACP_SEED_GOAL: 'active',
+      FAKE_ACP_FREEZE_AFTER_MS: '1500',
+    });
+    expect(await waitFor(() => existsSync(socketPath))).toBe(true);
+    // Se espera a que el proceso vivo cargue la sesion y a que el host se
+    // congele: a partir de ese momento, preguntar no devuelve nada.
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    const adapter = new KeeperGoalAdapter({
+      sessionId,
+      socketPath,
+      logger: quietLogger,
+      requestTimeoutMs: 5_000,
+    });
+    await adapter.start();
+    const goal = await adapter.read(sessionId);
+    expect(goal?.goalId).toBe('tg_fake_1');
+    expect(goal?.status).toBe('active');
+
+    await adapter.close();
+  }, 20_000);
+
+  it('el objetivo recien creado se lee al instante, sin esperar al aviso de cambio', async () => {
+    // El aviso de cambio del host llega despues de crear. Hasta que llega,
+    // leer tiene que dar el objetivo nuevo: dar el anterior —que ademas
+    // puede estar completo— habilita encadenar otra vez sin querer.
+    const sessionId = 'mvs_vivo';
+    const socketPath = startKeeper(sessionId, { FAKE_ACP_SEED_GOAL: 'complete' });
+    expect(await waitFor(() => existsSync(socketPath))).toBe(true);
+
+    const adapter = new KeeperGoalAdapter({
+      sessionId,
+      socketPath,
+      logger: quietLogger,
+      requestTimeoutMs: 5_000,
+    });
+    await adapter.start();
+
+    // El proceso vivo carga la sesion al arrancar; se espera a que sepa cual
+    // es el objetivo antes de compararlo con el nuevo.
+    let antes = await adapter.read(sessionId);
+    const limite = Date.now() + 5_000;
+    while (antes?.goalId !== 'tg_fake_1' && Date.now() < limite) {
+      await new Promise((r) => setTimeout(r, 50));
+      antes = await adapter.read(sessionId);
+    }
+    expect(antes?.goalId).toBe('tg_fake_1');
+
+    const creado = await adapter.create(sessionId, 'Un trabajo nuevo', 60_000);
+    expect(creado.goalId).toBe('tg_fake_2');
+
+    const despues = await adapter.read(sessionId);
+    expect(despues?.goalId).toBe('tg_fake_2');
+
+    await adapter.close();
+  }, 20_000);
+
   it('el hook crea el objetivo por el proceso vivo sin abrir un host nuevo', async () => {
     const sessionId = 'mvs_vivo';
     const socketPath = startKeeper(sessionId);
@@ -162,17 +225,20 @@ describe('proceso vivo', () => {
       { host: { command: '/bin/false', args: [] }, logger: quietLogger },
     );
 
-    expect(salida).not.toBe('');
-    const decision = JSON.parse(salida) as { decision: string; reason: string };
-    expect(decision.decision).toBe('block');
-    expect(decision.reason).toContain('Revisar el fichero de notas');
+    // El hook no alarga el turno: el host entrega el objetivo en un turno
+    // propio, y ahi el agente conserva las herramientas.
+    expect(salida).toBe('');
 
     const journal = JSON.parse(
       readFileSync(join(stateHome, 'goal-compass', 'prueba-vivo', 'journal.json'), 'utf8'),
-    ) as { sessionId: string; intents: { status: string; goalId?: string }[] };
+    ) as {
+      sessionId: string;
+      intents: { status: string; goalId?: string; hostObjective: string }[];
+    };
     expect(journal.sessionId).toBe(sessionId);
     expect(journal.intents[0]?.status).toBe('committed');
     expect(journal.intents[0]?.goalId).toBeTruthy();
+    expect(journal.intents[0]?.hostObjective).toContain('Revisar el fichero de notas');
   });
 
   it('el hook cae al camino de reserva cuando no hay proceso vivo', async () => {
@@ -184,9 +250,12 @@ describe('proceso vivo', () => {
       },
     );
 
-    expect(salida).not.toBe('');
-    const decision = JSON.parse(salida) as { decision: string };
-    expect(decision.decision).toBe('block');
+    expect(salida).toBe('');
+    const journal = JSON.parse(
+      readFileSync(join(stateHome, 'goal-compass', 'prueba-vivo', 'journal.json'), 'utf8'),
+    ) as { intents: { status: string; hostObjective: string }[] };
+    expect(journal.intents[0]?.status).toBe('committed');
+    expect(journal.intents[0]?.hostObjective).toContain('Revisar el fichero de notas');
   });
 
   it('el hook de inicio levanta el proceso vivo y el de fin lo apaga', async () => {
