@@ -1,3 +1,29 @@
+---
+id: diagnose
+role: agent
+links:
+  - to: implement
+    rel: next
+    when: causa y seam conocidos
+    evidence: reproducción roja y cambio mínimo
+  - to: probe
+    rel: next
+    when: falta aislar causa
+    evidence: experimento que discrimina dos hipótesis
+  - to: verify
+    rel: next
+    when: ya existe corrección aplicada
+    evidence: señal de regresión que puede pasar
+  - to: unblock
+    rel: recover
+    when: reproducción imposible tras intento razonable
+    evidence: impedimento específico
+  - to: stop
+    rel: escalate
+    when: no hay acceso al sistema o permiso
+    evidence: lo que debe aportar el usuario
+---
+
 # diagnose · Fallo / regresión
 
 ## Cuándo entrar
@@ -17,11 +43,3 @@ Buscar reproducción reducida: primero comando existente, prueba focalizada, log
 ## Criterio de salida
 
 Resultado de reproducción red/green u obstáculo específico, no teoría por intuición.
-
-## Enlaces
-
-- [implement](implement.md) — rel=next; si=causa y seam conocidos; evidencia=reproducción roja y cambio mínimo
-- [probe](probe.md) — rel=next; si=falta aislar causa; evidencia=experimento que discrimina dos hipótesis
-- [verify](verify.md) — rel=next; si=ya existe corrección aplicada; evidencia=señal de regresión que puede pasar
-- [unblock](unblock.md) — rel=recover; si=reproducción imposible tras intento razonable; evidencia=impedimento específico
-- [stop](stop.md) — rel=escalate; si=no hay acceso al sistema o permiso; evidencia=lo que debe aportar el usuario

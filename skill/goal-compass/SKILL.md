@@ -7,17 +7,51 @@ description: Navega objetivos de ingeniería por enlaces y evidencias cuando el 
 
 Eres navegador de decisiones dentro de una Mission continua. **No eres el supervisor externo ACP.**
 
-Tu entrada es la petición actual y la evidencia disponible. Empieza leyendo **solo** `graph/index.md` (relativo a esta skill) y después únicamente el nodo que corresponda. No recorras el grafo entero.
+Tu entrada es la petición actual y la evidencia disponible. Empieza leyendo **solo** el nodo de entrada del árbol (relativo a esta skill) y después únicamente el nodo que corresponda. No recorras el grafo entero.
+
+## El árbol
+
+Cada nodo es un markdown con una **cabecera YAML** y un prompt debajo. La
+cabecera es la parte que se lee con máquina:
+
+```yaml
+---
+id: implement
+role: agent          # quién ejecuta el nodo: agent o supervisor
+links:
+  - to: verify
+    rel: next        # next | recover | complete | escalate | discover | await
+    when: cambio aplicado          # la señal que activa esta salida
+    evidence: comando de prueba preciso   # lo que la sostiene
+---
+```
+
+- La **entrada** es el nodo cuya cabecera dice `entry: true`.
+- `role: supervisor` significa que ese nodo lo ejecuta el supervisor, no tú:
+  `choose-next` y `await-work` son de control. Si llegas a ellos, no los
+  ejecutas: el sistema los toma.
+- Las **condiciones** de la cabecera son la señal de salida de cada nodo: son
+  las que decides, no el orden de la lista.
+
+Si el proyecto tiene su propio árbol en `.goal-compass/`, ese manda sobre el
+de la skill: es la configuración local del proyecto.
 
 ## Protocolo
 
 1. Identifica objetivo verificable, evidencia ya observada y bloqueo actual; distingue hechos de conjeturas. Si el objetivo es pequeño, entra directamente en la fase pertinente.
-2. Selecciona **un** enlace condicionado de `index.md`, abre el nodo destino y responde a las preguntas que aporten decisiones (máximo tres). No sigas ramas por costumbre.
+2. Selecciona **un** enlace condicionado de la cabecera del nodo en el que
+   estás, abre el nodo destino y responde a las preguntas que aporten
+   decisiones (máximo tres). No sigas ramas por costumbre. Si el nodo que te
+   corresponde es de control (`role: supervisor`), no lo ejecutes tú.
 3. Ejecuta **una** acción pequeña y segura: leer fuente primaria, reproducir, medir, hacer un experimento, cambiar una unidad mínima o verificar. Respeta permisos, alcance y la forma de pruebas del proyecto.
 4. Comprueba el resultado real; usa solo los enlaces ofrecidos por el nodo (`rel=next|recover|complete|escalate|discover|await`). Cuando una condición no se cumple, no uses ese enlace. Tras dos intentos equivalentes sin evidencia nueva ve a `unblock`.
 5. Para apoyarte en otras skills del catálogo, descubre la lista disponible y lee su `SKILL.md` real. Usa skills que el modelo pueda invocar **solo cuando el entorno lo permita**; si requieren que el usuario las lance, sugiere el comando exacto y sigue con un paso local. Nunca digas que ejecutaste una skill que no ejecutaste.
 6. Cierra el Goal particular con `finish` cuando se pruebe su alcance, o `stop` si está bloqueado. **NO cierres por ello la Mission.**
 7. Al usar `update_goal(status=complete)`, deja de ejecutar herramientas y da la respuesta final según exige MCode. Nunca inventes resultados, no saltes permisos, no hagas push/releases/despliegues sin autorización explícita, y no crees un harness de pruebas pesado.
+8. Al cerrar un objetivo, **deja el trabajo siguiente** con `mission_propose`: la
+   evidencia que lo respalda y cómo se sabrá que está hecho. Sin eso la cadena
+   se queda sin combustible en cuanto la cola se vacía, aunque la misión siga
+   viva. Si de verdad no queda trabajo, dilo con claridad en vez de inventarlo.
 
 ## La relación con el Goal siguiente
 
@@ -52,8 +86,10 @@ trabajo para llenar la cola.
 
 ## Anclas
 
-- `graph/index.md` — hub con las señales y los enlaces.
-- `graph/nodes/*.md` — un nodo por fase, con "Cuándo entrar", preguntas, acción mínima, criterio de salida y enlaces.
+- `graph/index.md` — el nodo de entrada: su cabecera tiene las salidas y sus
+  condiciones.
+- `graph/nodes/*.md` — un nodo por fase, con "Cuándo entrar", preguntas, acción
+  mínima y criterio de salida. Las salidas de cada nodo están en su cabecera.
 
 ## Reanudación
 

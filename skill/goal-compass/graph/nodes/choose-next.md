@@ -1,3 +1,33 @@
+---
+id: choose-next
+role: supervisor
+links:
+  - to: investigate
+    rel: discover
+    when: hay pista concreta que investigar para abrir trabajo
+    evidence: hipótesis falsable
+  - to: plan
+    rel: next
+    when: hay varios candidatos con prerequisitos inciertos
+    evidence: lista de dependencias concreta
+  - to: implement
+    rel: next
+    when: Supervisor ya creó Goal pequeño ejecutable
+    evidence: GoalId distinto y status active
+  - to: await-work
+    rel: await
+    when: no hay trabajo autorizado respaldado por evidencia
+    evidence: backlog agotado y última inspección
+  - to: unblock
+    rel: recover
+    when: hay trabajo pero está atascado
+    evidence: bloqueo comprobado
+  - to: stop
+    rel: escalate
+    when: existen restricciones de seguridad o control
+    evidence: razón para intervención
+---
+
 # choose-next · Nuevo Goal para la misión
 
 ## Cuándo entrar
@@ -24,12 +54,3 @@ Un candidato sin evidencia o sin criterio de cierre observable no es candidato: 
 ## Criterio de salida
 
 Candidato nuevo, realizable, autorizado, no duplicado y verificable; o `parked` con motivo claro.
-
-## Enlaces
-
-- [investigate](investigate.md) — rel=discover; si=hay pista concreta que investigar para abrir trabajo; evidencia=hipótesis falsable
-- [plan](plan.md) — rel=next; si=hay varios candidatos con prerequisitos inciertos; evidencia=lista de dependencias concreta
-- [implement](implement.md) — rel=next; si=Supervisor ya creó Goal pequeño ejecutable; evidencia=GoalId distinto y status active
-- [await-work](await-work.md) — rel=await; si=no hay trabajo autorizado respaldado por evidencia; evidencia=backlog agotado y última inspección
-- [unblock](unblock.md) — rel=recover; si=hay trabajo pero está atascado; evidencia=bloqueo comprobado
-- [stop](stop.md) — rel=escalate; si=existen restricciones de seguridad o control; evidencia=razón para intervención

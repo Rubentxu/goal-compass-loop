@@ -1,3 +1,21 @@
+---
+id: finish
+role: agent
+links:
+  - to: choose-next
+    rel: discover
+    when: ACP confirmó complete y supervisor toma el control post-turn
+    evidence: GoalId completado y candidatos
+  - to: unblock
+    rel: recover
+    when: se descubre contradicción o regresión
+    evidence: hecho nuevo
+  - to: stop
+    rel: escalate
+    when: se descubre que no se puede sostener la prueba
+    evidence: límite demostrado
+---
+
 # finish · Objetivo demostrado
 
 ## Cuándo entrar
@@ -16,10 +34,3 @@ Emitir recibo conciso: resultado, evidencia exacta, archivos/cambios relevantes,
 ## Criterio de salida
 
 Goal actual completado con evidencia; Mission se mantiene activa fuera del Goal.
-
-## Enlaces
-
-- [choose-next](choose-next.md) — rel=discover; si=ACP confirmó complete y supervisor toma el control post-turn; evidencia=GoalId completado y candidatos
-
-- [unblock](unblock.md) — rel=recover; si=se descubre contradicción o regresión; evidencia=hecho nuevo
-- [stop](stop.md) — rel=escalate; si=se descubre que no se puede sostener la prueba; evidencia=límite demostrado

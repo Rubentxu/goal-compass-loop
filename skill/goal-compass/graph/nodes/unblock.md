@@ -1,3 +1,33 @@
+---
+id: unblock
+role: agent
+links:
+  - to: investigate
+    rel: next
+    when: falta información primaria
+    evidence: fuente candidata
+  - to: diagnose
+    rel: next
+    when: falla observable y se puede reproducir distinto
+    evidence: nueva señal
+  - to: probe
+    rel: next
+    when: alternativa falsable y barata
+    evidence: experimento discriminante
+  - to: plan
+    rel: next
+    when: reordenar dependencias permite avance
+    evidence: rebanada sin bloqueo
+  - to: implement
+    rel: next
+    when: hay trabajo seguro independiente
+    evidence: cambio delimitado
+  - to: stop
+    rel: escalate
+    when: todas las alternativas requieren permiso o recurso externo
+    evidence: pregunta/dueño y trabajo que queda
+---
+
 # unblock · Cambio de estrategia
 
 ## Cuándo entrar
@@ -17,12 +47,3 @@ Enumerar máximo DOS alternativas distintas; priorizar prueba reversible y míni
 ## Criterio de salida
 
 Se identifica alternativa operable o se detiene con dueño del bloqueo y siguiente condición externa.
-
-## Enlaces
-
-- [investigate](investigate.md) — rel=next; si=falta información primaria; evidencia=fuente candidata
-- [diagnose](diagnose.md) — rel=next; si=falla observable y se puede reproducir distinto; evidencia=nueva señal
-- [probe](probe.md) — rel=next; si=alternativa falsable y barata; evidencia=experimento discriminante
-- [plan](plan.md) — rel=next; si=reordenar dependencias permite avance; evidencia=rebanada sin bloqueo
-- [implement](implement.md) — rel=next; si=hay trabajo seguro independiente; evidencia=cambio delimitado
-- [stop](stop.md) — rel=escalate; si=todas las alternativas requieren permiso o recurso externo; evidencia=pregunta/dueño y trabajo que queda

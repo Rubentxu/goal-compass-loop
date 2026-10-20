@@ -1,3 +1,29 @@
+---
+id: investigate
+role: agent
+links:
+  - to: probe
+    rel: next
+    when: falta prueba empírica
+    evidence: experimento pequeño definido
+  - to: plan
+    rel: next
+    when: conocimiento suficiente y cambio grande
+    evidence: restricción principal aclarada
+  - to: implement
+    rel: next
+    when: trabajo mínimo ya definido
+    evidence: comportamiento deseado
+  - to: finish
+    rel: complete
+    when: la investigación era el objetivo y está sustentada
+    evidence: fuentes y conclusión
+  - to: unblock
+    rel: recover
+    when: no hay fuentes fiables
+    evidence: vacío de evidencia
+---
+
 # investigate · Conocimiento insuficiente
 
 ## Cuándo entrar
@@ -17,11 +43,3 @@ Leer la fuente primaria más cercana (firma, callsite, tests existentes, documen
 ## Criterio de salida
 
 Citar origen y separar hecho/hipótesis/información faltante.
-
-## Enlaces
-
-- [probe](probe.md) — rel=next; si=falta prueba empírica; evidencia=experimento pequeño definido
-- [plan](plan.md) — rel=next; si=conocimiento suficiente y cambio grande; evidencia=restricción principal aclarada
-- [implement](implement.md) — rel=next; si=trabajo mínimo ya definido; evidencia=comportamiento deseado
-- [finish](finish.md) — rel=complete; si=la investigación era el objetivo y está sustentada; evidencia=fuentes y conclusión
-- [unblock](unblock.md) — rel=recover; si=no hay fuentes fiables; evidencia=vacío de evidencia

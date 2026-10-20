@@ -1,3 +1,21 @@
+---
+id: stop
+role: agent
+links:
+  - to: await-work
+    rel: await
+    when: misión sigue autorizada pero carece de señales útiles
+    evidence: motivo de espera
+  - to: unblock
+    rel: recover
+    when: aparece permiso o evidencia nuevos
+    evidence: cambio que desbloquea
+  - to: finish
+    rel: complete
+    when: se demuestra que el objetivo estaba cumplido
+    evidence: prueba válida
+---
+
 # stop · Cierre honesto
 
 ## Cuándo entrar
@@ -16,10 +34,3 @@ Informar progreso parcial y bloqueo exacto, ofrecer siguiente acción humana sin
 ## Criterio de salida
 
 Bloqueo nombrado, trabajo guardado si estaba autorizado, salida segura.
-
-## Enlaces
-
-- [await-work](await-work.md) — rel=await; si=misión sigue autorizada pero carece de señales útiles; evidencia=motivo de espera
-
-- [unblock](unblock.md) — rel=recover; si=aparece permiso o evidencia nuevos; evidencia=cambio que desbloquea
-- [finish](finish.md) — rel=complete; si=se demuestra que el objetivo estaba cumplido; evidencia=prueba válida

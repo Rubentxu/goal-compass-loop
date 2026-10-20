@@ -1,3 +1,29 @@
+---
+id: verify
+role: agent
+links:
+  - to: diagnose
+    rel: recover
+    when: falla prueba relevante
+    evidence: error reproducible
+  - to: implement
+    rel: recover
+    when: revisión detectó defecto claro
+    evidence: cambio acotado solicitado
+  - to: deliver
+    rel: next
+    when: objetivo probado y usuario autoriza entrega
+    evidence: prueba y diffs revisados
+  - to: finish
+    rel: complete
+    when: solo se solicitó comprobar y se hizo
+    evidence: resultado y límite
+  - to: unblock
+    rel: recover
+    when: no existe manera de verificar con permisos actuales
+    evidence: bloqueo de verificación
+---
+
 # verify · Verificación precisa
 
 ## Cuándo entrar
@@ -17,11 +43,3 @@ Ejecutar test focalizado y typecheck o chequeo pertinente; antes de release real
 ## Criterio de salida
 
 Evidencia de comando/resultado con alcance y limitaciones; nunca PASS inventado.
-
-## Enlaces
-
-- [diagnose](diagnose.md) — rel=recover; si=falla prueba relevante; evidencia=error reproducible
-- [implement](implement.md) — rel=recover; si=revisión detectó defecto claro; evidencia=cambio acotado solicitado
-- [deliver](deliver.md) — rel=next; si=objetivo probado y usuario autoriza entrega; evidencia=prueba y diffs revisados
-- [finish](finish.md) — rel=complete; si=solo se solicitó comprobar y se hizo; evidencia=resultado y límite
-- [unblock](unblock.md) — rel=recover; si=no existe manera de verificar con permisos actuales; evidencia=bloqueo de verificación

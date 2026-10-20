@@ -1,3 +1,29 @@
+---
+id: probe
+role: agent
+links:
+  - to: investigate
+    rel: next
+    when: resultado requiere otra fuente
+    evidence: nueva pregunta precisa
+  - to: diagnose
+    rel: next
+    when: se obtuvo reproducción de fallo
+    evidence: señal roja estable
+  - to: implement
+    rel: next
+    when: experimento valida un seam práctico
+    evidence: alcance mínimo
+  - to: plan
+    rel: next
+    when: experimento indica decisiones amplias
+    evidence: requisitos priorizados
+  - to: unblock
+    rel: recover
+    when: experimento inviable o ambiguo
+    evidence: razón y alternativa
+---
+
 # probe · Experimento de bajo coste
 
 ## Cuándo entrar
@@ -17,11 +43,3 @@ Crear o ejecutar un único experimento efímero (repro CLI, fixture, spike aisla
 ## Criterio de salida
 
 Registrar entrada, salida, su interpretación limitada y qué hipótesis cambia.
-
-## Enlaces
-
-- [investigate](investigate.md) — rel=next; si=resultado requiere otra fuente; evidencia=nueva pregunta precisa
-- [diagnose](diagnose.md) — rel=next; si=se obtuvo reproducción de fallo; evidencia=señal roja estable
-- [implement](implement.md) — rel=next; si=experimento valida un seam práctico; evidencia=alcance mínimo
-- [plan](plan.md) — rel=next; si=experimento indica decisiones amplias; evidencia=requisitos priorizados
-- [unblock](unblock.md) — rel=recover; si=experimento inviable o ambiguo; evidencia=razón y alternativa

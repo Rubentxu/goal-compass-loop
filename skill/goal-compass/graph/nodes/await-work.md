@@ -1,3 +1,21 @@
+---
+id: await-work
+role: supervisor
+links:
+  - to: choose-next
+    rel: discover
+    when: aparecen nuevas señales o instrucciones válidas
+    evidence: candidato elegible nuevo
+  - to: unblock
+    rel: recover
+    when: desaparece dependencia y queda tarea pendiente
+    evidence: desbloqueo verificable
+  - to: stop
+    rel: escalate
+    when: usuario cancela o revoca autorización
+    evidence: orden explícita
+---
+
 # await-work · Misión viva en espera
 
 ## Cuándo entrar
@@ -18,9 +36,3 @@ La misión se reanuda sola cuando aparece trabajo nuevo: un candidato añadido a
 ## Criterio de salida
 
 La misión persiste, reanudable; ninguna creación ni consumo LLM hasta nueva evidencia.
-
-## Enlaces
-
-- [choose-next](choose-next.md) — rel=discover; si=aparecen nuevas señales o instrucciones válidas; evidencia=candidato elegible nuevo
-- [unblock](unblock.md) — rel=recover; si=desaparece dependencia y queda tarea pendiente; evidencia=desbloqueo verificable
-- [stop](stop.md) — rel=escalate; si=usuario cancela o revoca autorización; evidencia=orden explícita

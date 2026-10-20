@@ -1,3 +1,25 @@
+---
+id: implement
+role: agent
+links:
+  - to: verify
+    rel: next
+    when: cambio aplicado
+    evidence: comando de prueba preciso
+  - to: diagnose
+    rel: recover
+    when: falla conducta al ejecutarla
+    evidence: señal roja nueva
+  - to: plan
+    rel: recover
+    when: alcance creció por dependencia real
+    evidence: nueva rebanada
+  - to: unblock
+    rel: recover
+    when: API/permisos/seam no permiten continuar
+    evidence: causa demostrada
+---
+
 # implement · Implementación pequeña
 
 ## Cuándo entrar
@@ -17,10 +39,3 @@ Aplicar un vertical slice pequeño, priorizando función pura cuando proceda, AD
 ## Criterio de salida
 
 Diff acotado y un resultado de verificación, o un motivo verificable de bloqueo.
-
-## Enlaces
-
-- [verify](verify.md) — rel=next; si=cambio aplicado; evidencia=comando de prueba preciso
-- [diagnose](diagnose.md) — rel=recover; si=falla conducta al ejecutarla; evidencia=señal roja nueva
-- [plan](plan.md) — rel=recover; si=alcance creció por dependencia real; evidencia=nueva rebanada
-- [unblock](unblock.md) — rel=recover; si=API/permisos/seam no permiten continuar; evidencia=causa demostrada

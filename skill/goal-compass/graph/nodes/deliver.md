@@ -1,3 +1,25 @@
+---
+id: deliver
+role: agent
+links:
+  - to: finish
+    rel: complete
+    when: entrega solicitada efectuada
+    evidence: identificador/resultado real
+  - to: verify
+    rel: recover
+    when: gate final falla
+    evidence: error de gate
+  - to: unblock
+    rel: recover
+    when: sin remoto/acceso/permiso
+    evidence: motivo concreto
+  - to: stop
+    rel: escalate
+    when: operación insegura o no autorizada
+    evidence: paso requerido por humano
+---
+
 # deliver · Entrega controlada
 
 ## Cuándo entrar
@@ -17,10 +39,3 @@ Revisar diff y cambios inesperados; preparar Conventional Commit. Ejecutar push,
 ## Criterio de salida
 
 Commit/release/enlace verificables, o indicar claramente si la operación no se ejecutó.
-
-## Enlaces
-
-- [finish](finish.md) — rel=complete; si=entrega solicitada efectuada; evidencia=identificador/resultado real
-- [verify](verify.md) — rel=recover; si=gate final falla; evidencia=error de gate
-- [unblock](unblock.md) — rel=recover; si=sin remoto/acceso/permiso; evidencia=motivo concreto
-- [stop](stop.md) — rel=escalate; si=operación insegura o no autorizada; evidencia=paso requerido por humano

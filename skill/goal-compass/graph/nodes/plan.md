@@ -1,3 +1,29 @@
+---
+id: plan
+role: agent
+links:
+  - to: investigate
+    rel: next
+    when: falta requisito técnico imprescindible
+    evidence: pregunta concreta
+  - to: probe
+    rel: next
+    when: arquitectura incierta y comprobable
+    evidence: spike delimitado
+  - to: implement
+    rel: next
+    when: primer bloque acordado
+    evidence: criterio de éxito
+  - to: unblock
+    rel: recover
+    when: bloqueos entre dependencias
+    evidence: causa y dueño
+  - to: stop
+    rel: escalate
+    when: requiere decisión humana indispensable
+    evidence: pregunta única
+---
+
 # plan · Plan acotado
 
 ## Cuándo entrar
@@ -17,11 +43,3 @@ Describir un único bloque valioso, su evidencia de salida y dependencias. Para 
 ## Criterio de salida
 
 Primera rebanada viable con criterio de aceptación y límites.
-
-## Enlaces
-
-- [investigate](investigate.md) — rel=next; si=falta requisito técnico imprescindible; evidencia=pregunta concreta
-- [probe](probe.md) — rel=next; si=arquitectura incierta y comprobable; evidencia=spike delimitado
-- [implement](implement.md) — rel=next; si=primer bloque acordado; evidencia=criterio de éxito
-- [unblock](unblock.md) — rel=recover; si=bloqueos entre dependencias; evidencia=causa y dueño
-- [stop](stop.md) — rel=escalate; si=requiere decisión humana indispensable; evidencia=pregunta única
