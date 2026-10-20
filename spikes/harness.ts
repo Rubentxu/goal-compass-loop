@@ -18,6 +18,7 @@ import { FileControlPort } from '../src/adapters/control.js';
 import { FileJournal } from '../src/adapters/journal.js';
 import { ComposedCandidatePort } from '../src/adapters/candidates.js';
 import { SessionExploration } from '../src/adapters/exploration.js';
+import { ChainLock } from '../src/adapters/ownership.js';
 import { writeProposal } from '../src/adapters/proposals.js';
 import { buildCandidatePorts } from '../src/runtime.js';
 import type { Candidate, Journal, Mission, MissionStatus } from '../src/core/types.js';
@@ -97,6 +98,13 @@ export interface ScenarioContext {
   patchMission(patch: Partial<Mission>): Promise<void>;
   /** Reinicia el host ACP reanudando la misma sesion. */
   restartHost(): Promise<void>;
+  /**
+   * Si el registro del escenario contiene un texto.
+   *
+   * Sirve para distinguir quien encadeno un objetivo: el supervisor lo
+   * anuncia con su propia frase y el hook con la suya.
+   */
+  logContains(text: string): boolean;
 }
 
 export interface Scenario {
@@ -126,17 +134,30 @@ export async function runScenario(
   const timeoutMs = options.timeoutMs ?? scenario.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const workspace = mkdtempSync(join(tmpdir(), `gcl-${scenario.name}-`));
   const missionId = `uat-${scenario.name}-${Date.now()}`;
-  const log = options.quiet
-    ? { info: () => {}, warn: () => {}, error: () => {} }
-    : {
-        info: (message: string) => console.log(`[${new Date().toISOString()}] ${message}`),
-        warn: (message: string) => console.warn(`[${new Date().toISOString()}] AVISO ${message}`),
-        error: (message: string) => console.error(`[${new Date().toISOString()}] ERROR ${message}`),
-      };
+  // El registro se guarda siempre, aunque no se muestre: el escenario lo
+  // consulta para saber que hizo cada camino.
+  const register: string[] = [];
+  const stamp = (): string => `[${new Date().toISOString()}]`;
+  const log = {
+    info: (message: string) => {
+      register.push(message);
+      if (!options.quiet) console.log(`${stamp()} ${message}`);
+    },
+    warn: (message: string) => {
+      register.push(message);
+      if (!options.quiet) console.warn(`${stamp()} AVISO ${message}`);
+    },
+    error: (message: string) => {
+      register.push(message);
+      if (!options.quiet) console.error(`${stamp()} ERROR ${message}`);
+    },
+  };
 
   const journal = new FileJournal(missionId);
   const control = new FileControlPort(missionId);
-  const missionFile = join(workspace, 'mission.json');
+  // El plugin busca la declaracion por su nombre. El arnes usa el mismo
+  // nombre que el producto, para que la via que se aparta sea la real.
+  const missionFile = join(workspace, 'goal-compass.json');
   let candidates: Candidate[] = [];
   let supervisor: Supervisor | undefined;
   let adapter: AcpGoalAdapter | undefined;
@@ -156,6 +177,9 @@ export async function runScenario(
           explorationEnabled: true,
           explorationCooldownMs: 30 * 60_000,
           allowRemoteWrite: false,
+          // El escenario mide el camino del supervisor. Declararlo deja al hook
+          // del plugin aparte, que si no se adelantaria a encadenar.
+          driver: 'supervisor',
           backlog: candidates,
         },
         null,
@@ -211,6 +235,7 @@ export async function runScenario(
           buildCandidatePorts(missionFile, workspace, { maxEvidence: 5 }),
         ),
         journalPort: journal,
+        chainLock: new ChainLock(missionId),
         controlPort: control,
         explorationPort: new SessionExploration(adapter!, workspace),
         clock: { now: () => Date.now() },
@@ -295,6 +320,9 @@ export async function runScenario(
       await adapter?.close();
       adapter = new AcpGoalAdapter({ workspace, sessionId, logger: log });
       await adapter.start();
+    },
+    logContains(text: string) {
+      return register.some((line) => line.includes(text));
     },
   };
 

@@ -176,6 +176,8 @@ const exploration: Scenario = {
     const origin = first?.candidateId.startsWith('propuesta:') ? 'propuesta' : 'exploracion';
     const evidence = first ? evidenceOf(state, context.missionId, first.candidateId) : [];
     const real = evidence.filter((ref) => existsSync(join(context.workspace, ref.split(':')[0]!)));
+    const bySupervisor =
+      first?.goalId !== undefined && context.logContains(`goal creado y confirmado: ${first.goalId}`);
 
     return [
       {
@@ -196,6 +198,16 @@ const exploration: Scenario = {
         name: 'su evidencia senala a un fichero real',
         ok: evidence.length > 0 && real.length === evidence.length,
         detail: evidence.join(', '),
+      },
+      {
+        name: 'el supervisor encadeno el objetivo',
+        ok: bySupervisor,
+        detail: bySupervisor ? first?.goalId : 'ningun registro del supervisor lo nombra',
+      },
+      {
+        name: 'no se encadeno el mismo trabajo dos veces',
+        ok: created.length === 1,
+        detail: `${created.length}`,
       },
     ];
   },
