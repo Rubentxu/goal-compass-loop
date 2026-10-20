@@ -1266,6 +1266,21 @@ Veintiocho comprobaciones, con las cifras de esta ejecución: la cadena costó
 escenario de exploración siguió midiendo lo que mide: trabajo real, con
 evidencia que señala a ficheros que existen, encadenado una sola vez.
 
+La cadena de esta ejecución, con el trabajo del medio llegando por el canal de
+propuestas:
+
+```text
+[2026-10-20T10:00:27.323Z] decision: create - trabajo pendiente de la cadena
+[2026-10-20T10:00:27.562Z] goal creado y confirmado: tg_qs5aok6er9mvgiipjn (active)
+[2026-10-20T10:02:51.765Z] goal completado registrado: tg_qs5aok6er9mvgiipjn (complete(verifier_met))
+[2026-10-20T10:02:51.783Z] decision: create - propuesto durante la sesion
+[2026-10-20T10:02:51.873Z] goal creado y confirmado: tg_9vs0u5fmilmvgilt0g (active)
+[2026-10-20T10:05:46.162Z] goal completado registrado: tg_9vs0u5fmilmvgilt0g (complete(verifier_met))
+[2026-10-20T10:05:46.170Z] decision: create - trabajo pendiente de la cadena
+[2026-10-20T10:05:46.251Z] goal creado y confirmado: tg_u678z195ugmvgipjkj (active)
+[2026-10-20T10:08:17.586Z] goal completado registrado: tg_u678z195ugmvgipjkj (complete(verifier_met))
+```
+
 La suite permanente sube a **144 pruebas en 12 ficheros**: las nuevas cubren el
 identificador derivado, la declaración que no pisa, la que se puede escribir a
 mano, la que está a medio hacer, la que no es legible, el enlace simbólico que
