@@ -1614,7 +1614,84 @@ Diez segundos y ocho décimas, con la continuación dentro. La misma
 ejecución, antes del arreglo, tardaba dos minutos y diez segundos y no
 devolvía nada.
 
-## 13 · Lo que NO se ha ejecutado
+## 13 · La continuidad que no depende del tamaño de la sesión
+
+### 13.1 El síntoma
+
+El hook encadenaba deprisa al principio y se acercaba a su límite con el
+tiempo. No era el hook: era el trabajo que el hook tenía que hacer antes de
+encadenar.
+
+La sesión de este repositorio tiene **22 MB de historial**. Cargarla cuesta
+**6,2 segundos**, y el historial crece con cada turno: cuanto más trabaja la
+cadena, más cara es la carga siguiente.
+
+### 13.2 Lo que exige el host
+
+Mirado en el paquete de `mcode` 0.6.12 y medido contra el host real:
+
+- `mcode/session/goal/create` **exige que la sesión esté cargada en el proceso
+  ACP** que hace la petición. Sin `session/load` previo: `Resource not found`.
+- `mcode/session/activate` solo acepta sesiones **creadas en ese mismo
+  proceso** ACP: no sirve para abrirse en una sesión que ya existía.
+- **`create_goal` no está expuesta al agente** en 0.6.12. La clase está en el
+  paquete pero no se instancia: las herramientas de objetivo que ve el agente
+  son `get_goal` y `update_goal`. La vía de «que el agente cree su propio
+  objetivo» queda descartada.
+- El host da a un hook de plugin **10 segundos como máximo** (el manifiesto
+  solo admite enteros de 1 a 10) y el presupuesto de todo un evento de hook
+  es de 15 segundos.
+
+### 13.3 Las medidas
+
+Con el host real, en la sesión de este repositorio:
+
+| Operación | Coste |
+|---|---|
+| Arrancar el host ACP y apretar manos | 3 505 ms |
+| Cargar la sesión (22 MB de historial) | **6 245 ms** |
+| Cargar la sesión otra vez, en el mismo proceso | 6 701 ms (no hay caché: se relee) |
+| Crear el objetivo con la sesión ya cargada | 146 ms la primera vez, **40 ms** la segunda |
+| Leer el objetivo con la sesión ya cargada | **2 ms** |
+
+La última fila es la que importa: **el coste estaba en la carga, no en la
+creación**. Con la sesión ya cargada, crear un objetivo es trabajo de un
+instante.
+
+### 13.4 La prueba contra el host real
+
+Sesión real, por ACP, con el plugin instalado y una misión declarada en el
+directorio de trabajo:
+
+```text
+14:27:34.635  el proceso vivo empieza a escuchar
+14:27:37.933  el host ACP anuncia la extensión de objetivo
+14:27:39.114  la sesión queda cargada en el proceso vivo
+14:27:41.703  el hook de continuación toma el mando
+14:27:41.760  el objetivo siguiente está creado
+```
+
+**57 milisegundos** entre que el hook toma el mando y que el objetivo existe.
+El camino anterior, con la carga de la sesión dentro, necesitaba más de seis
+segundos solo para llegar al mismo punto.
+
+El objetivo creado (`tg_f4muylb5t3mvgs2ds0`) quedó activo en el host, el
+agente trabajó en él —escribió el fichero que pedía— y el presupuesto gastado
+se midió en el journal de la misión.
+
+### 13.5 Lo que se encontró por el camino
+
+- **El hook de inicio de sesión también se dispara en las sesiones de
+  subagente**, y esas el host no las deja abrir: `Invalid params: Sub-agent
+  Sessions are internal and cannot be opened`. El proceso vivo ahora lo
+  reconoce y se apaga en vez de reintentar cinco veces.
+- **El proceso vivo muere con el host que lo lanzó.** Comprobado en el rastro:
+  `el proceso que lanzo el proceso vivo ya no esta: se apaga`.
+- **El fin de sesión no siempre se dispara** (`mcode exec` no lo dispara), así
+  que el proceso vivo no puede depender solo de ese hook: se apaga también
+  cuando su dueño desaparece.
+
+## 14 · Lo que NO se ha ejecutado
 
 - **El plugin no se ha probado en la interfaz gráfica.** La validación se ha
   hecho con `mcode exec`, que es la misma ruta de hooks pero sin pantalla.
@@ -1629,3 +1706,13 @@ devolvía nada.
   agente del host propuso con la herramienta y el sistema encadenó su
   propuesta, con evidencia y criterio de cierre. Lo que no se ha repetido es
   esa prueba varias veces: una vez es un indicio, no una garantía.
+- **El proceso vivo no se ha probado desde la interfaz gráfica.** Se ha
+  probado con una sesión real por ACP: el hook de inicio levanta el proceso,
+  el de continuación crea el objetivo por él y el objetivo queda activo en el
+  host. Lo que no se ha hecho es arrancar la interfaz y ver cómo se comporta
+  el proceso vivo en una sesión larga de uso normal.
+- **El proceso vivo no se ha probado con el historial grande.** Se ha probado
+  con una sesión recién empezada, que es justo cuando tiene que cargar. La
+  cuenta de «6,2 segundos para una sesión de 22 MB» viene de la sesión de
+  este repositorio, pero cargarla en un proceso vivo para ver que aguanta no se
+  ha hecho.

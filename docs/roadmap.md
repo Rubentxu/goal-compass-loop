@@ -59,6 +59,32 @@ llega al agente.
 
 ---
 
+<a id="p10"></a>
+
+## 10 · La continuidad no depende de que la sesión sea pequeña
+
+**Prioridad:** máxima · **Estado:** hecha y medida
+
+**El hueco.** El host solo deja crear un objetivo sobre una sesión que esté
+cargada en el proceso que habla con él, y cargar la sesión es leerle todo el
+historial: 22 MB y 6,2 segundos en la sesión de este repositorio. El hook
+pagaba esa carga en cada turno, con un límite de 10 segundos del host, así que
+la cadena se acercaba a romperse justo cuando la sesión se llenaba, que es
+cuando más trabajo había. El coste crecía con el trabajo que el propio sistema
+producía.
+
+**Lo que se hizo.** Un proceso vivo: nace con la sesión, cuando su historial
+todavía es pequeño, se queda con la sesión cargada y atiende por un socket
+local las peticiones de crear objetivo. El hook le pregunta al proceso vivo y,
+si no está, abre su propio host como antes. Crear el objetivo pasa de 6,2 s a
+57 ms, y ya no crece con la sesión.
+
+**Condición de cierre.** El hook crea el siguiente objetivo por el proceso vivo
+sin abrir un host nuevo, el proceso vivo muere con la sesión que lo lanzó, y
+el camino de reserva sigue funcionando. Verificado contra el host real.
+
+---
+
 <a id="p0"></a>
 
 ## 0 · El objetivo del usuario no se le cobra a la misión
@@ -285,6 +311,9 @@ y el razonamiento nuevo vive en el cuerpo de la documentación.
 | 5 | El ejemplo de declaración está al día | baja | — |
 | 6 | Las dos decisiones que más cambiaron el producto tienen su ADR | media | — |
 | 7 | El ciclo activo, a la vista | media-alta | 2 |
+| 8 | El presupuesto guía, no frena | máxima | — |
+| 9 | El hook da continuidad y llega a tiempo | máxima | — |
+| 10 | La continuidad no depende de que la sesión sea pequeña | máxima | 9 |
 
 ---
 

@@ -62,6 +62,22 @@ cero en cada turno.
 - **8** (explorar desde el hook) — el hook tiene margen de segundos. Se puede
   hacer al revés: que el agente, al cerrar su turno, pregunte al modelo qué
   hacer después. Es lo mismo que **4** visto desde el otro lado.
-- **9** (presupuesto renovable) — el presupuesto es el freno del usuario y no
-  se toca. Lo que se hace es **5**: decir con claridad cuánto falta.
+- **9** (presupuesto renovable) — **hecho, pero de otra manera**: el objetivo
+  agotado no muere, vuelve a la cola con el doble de margen. El presupuesto es
+  la medida del trabajo, no su freno, y el freno del usuario sigue en pie.
 - **10** (includes) — nadie lo ha pedido y un árbol de 13 nodos no lo necesita.
+
+## Lo que se pensó después y sigue fuera
+
+Estas ideas no se integraron, pero la forma de pensar que hay detrás sí se quedó
+en el producto:
+
+- **Que el agente cree su propio objetivo.** El host expone al agente
+  `get_goal` y `update_goal`, pero no `create_goal`: la clase está en el
+  paquete de `mcode` y no se llega a instanciar. Como el objetivo tiene que
+  vivir en la sesión del agente, crearlo desde fuera —que es lo que hace el
+  plugin— sigue siendo necesario.
+- **Que el hook lo arreglara todo.** El hook tenía margen de segundos, y
+  cargarle la sesión entera era lo que se lo consumía. La solución fue mover
+  esa carga a un proceso que la paga una vez, cuando todavía es barata, no
+  estirar el margen.

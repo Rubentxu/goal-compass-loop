@@ -665,6 +665,60 @@ que lo espera.** Y un fallo silencioso es peor que un fallo ruidoso: el host
 tira la salida y sigue como si nada, así que el síntoma aparece donde no está
 la causa — en el agente que «no continúa», y no en el hook que no llegó.
 
+### 3.19 La continuidad que no depende del tamaño de la sesión
+
+Arreglar el hook lo dejó rápido... mientras la sesión fuera pequeña. La
+razón era más profunda de lo que parecía.
+
+El host solo deja crear un objetivo sobre una sesión que esté **cargada en el
+proceso que habla con él**. Cargar la sesión no es abrirla: es leerle todo el
+historial. En esta sesión, 22 MB de historial y **6,2 segundos** por carga. Y
+el historial crece con cada turno: cuanto más trabaja la cadena, más cara es
+la carga.
+
+El hook pagaba esa carga en cada turno. Con el límite del host en 10 segundos
+y la carga en 6,2 —más el apretón de manos de 3,5—, el hook vivía al borde.
+No era un hook lento: era un hook cuyo coste crecía con el trabajo que él
+mismo producía. La cadena se rompía justo cuando la sesión se llenaba, que
+es cuando más trabajo había.
+
+La solución no era ajustar el margen: era **no pagar la carga en cada turno**.
+
+#### El proceso vivo
+
+Un proceso que nace con la sesión y se queda con ella cargada:
+
+- El hook de **inicio de sesión** lo levanta. En ese momento el historial
+  todavía es pequeño, así que la carga es barata.
+- El proceso vivo habla con el host por su cuenta y se queda con la sesión
+  cargada.
+- Escucha en un **socket local** y atiende peticiones: leer el objetivo,
+  crearlo, pausarlo, vaciarlo.
+- El hook de **fin de sesión** lo apaga. Y si nadie lo apaga, se apaga solo
+  cuando muere el host que lo lanzó.
+
+El hook de continuación, al terminar un turno, **le pregunta al proceso vivo**
+en vez de abrir un host propio. Y si no hay proceso vivo, abre el suyo, como
+antes: ese camino sigue siendo el de reserva.
+
+#### Lo que cambia
+
+| | antes | ahora |
+|---|---|---|
+| Crear el objetivo | 6,2 s y crece | 57 ms y constante |
+| Cargar la sesión | en cada turno | una vez, al empezar |
+| Tope del host (10 s) | al borde | holgado |
+
+El supervisor no se entera: sigue hablando con un puerto de objetivos, y ese
+puerto ahora puede estar en un proceso vivo o en un host propio. Lo que antes
+era el camino principal es el de reserva, y al revés.
+
+#### La lección
+
+**Un coste que crece con el trabajo que el sistema produce es una bomba de
+reloj.** El margen no la arregla: la hace saltar antes. Lo que la arregla es
+**pagarla una vez**, en el momento en que todavía es barata.
+
 ## 4. Cómo se usa
 
 ### Con el plugin (lo recomendado)
