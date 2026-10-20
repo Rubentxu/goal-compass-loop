@@ -720,26 +720,29 @@ Los cinco escenarios, con sus comprobaciones:
 
 | Escenario | Comprobaciones | Resultado |
 |---|---|---|
-| `chain` | 12 | Tres objetivos encadenados sin intervención; el del medio llega por el canal de propuestas y se encadena en su momento; 107 573 tokens medidos |
+| `chain` | 12 | Tres objetivos encadenados sin intervención; el del medio llega por el canal de propuestas y se encadena en su momento; 102 105 tokens medidos |
 | `recovery` | 4 | Un fallo entre crear y confirmar se reconcilia sin duplicar |
 | `pause` | 3 | La orden de pausa detiene el trabajo en curso y la de continuar lo reanuda |
-| `budget` | 3 | Agotado el presupuesto (67 307 tokens), la cadena se detiene sin crear otro objetivo |
-| `exploration` | 4 | Sin backlog ni pendientes marcados, el sistema pide buscar trabajo, encuentra trabajo real y lo encadena, con evidencia que señala a un fichero que existe |
+| `budget` | 3 | Agotado el presupuesto (87 570 tokens), la cadena se detiene sin crear otro objetivo |
+| `exploration` | 6 | Sin backlog ni pendientes marcados, el sistema pide buscar trabajo, encuentra trabajo real y lo encadena, con evidencia que señala a ficheros que existen, y sin encadenar el mismo trabajo dos veces |
+
+La última ejecución es la del ciclo de la conduccion unica (seccion 7), que
+anadio dos comprobaciones al escenario de exploracion: que lo encadenara el
+supervisor y que el trabajo no se encadenara dos veces.
 
 La cadena, con el trabajo del medio llegando por el canal de propuestas:
 
 ```text
-[00:29:46.647Z] decision: create - trabajo pendiente de la cadena
-[00:29:46.656Z] intencion persistida: primero -> 2f4a626e-318d-40be-b3d4-47d75eba7366
-[00:29:46.769Z] goal creado y confirmado: tg_yeeq33w6b3mvfy4t9h (active)
-[00:32:04.891Z] goal completado registrado: tg_yeeq33w6b3mvfy4t9h (complete(verifier_met))
-[00:32:04.900Z] decision: create - propuesto durante la sesion
-[00:32:04.909Z] intencion persistida: propuesta:Escribe un fichero llamado resultado-2.txt ...
-[00:32:04.953Z] goal creado y confirmado: tg_fkq6vncfa8mvfy7rxs (active)
-[00:34:47.099Z] goal completado registrado: tg_fkq6vncfa8mvfy7rxs (complete(verifier_met))
-[00:34:47.122Z] decision: create - trabajo pendiente de la cadena
-[00:34:47.145Z] intencion persistida: tercero -> afe95a31-b401-42ae-ac0d-025883dd41be
-[00:34:47.198Z] goal creado y confirmado: tg_56a77j3duomvfyb94c (active)
+[2026-10-20T04:25:01.272Z] decision: create - trabajo pendiente de la cadena
+[2026-10-20T04:25:01.282Z] intencion persistida: primero -> e031336b-f4c7-4a2a-9d69-af811d4e2671
+[2026-10-20T04:25:01.389Z] goal creado y confirmado: tg_ddbwd4dfs7mvg6jc6e (active)
+[2026-10-20T04:27:19.525Z] goal completado registrado: tg_ddbwd4dfs7mvg6jc6e (complete(verifier_met))
+[2026-10-20T04:27:19.532Z] decision: create - propuesto durante la sesion
+[2026-10-20T04:27:19.541Z] intencion persistida: propuesta:Escribe un fichero llamado resultado-2.txt ...
+[2026-10-20T04:27:19.620Z] goal creado y confirmado: tg_ijkwimrygzmvg6mauz (active)
+[2026-10-20T04:29:28.839Z] decision: create - trabajo pendiente de la cadena
+[2026-10-20T04:29:28.861Z] intencion persistida: tercero -> 42cdcb55-d133-4004-a6b2-abf31b552c6e
+[2026-10-20T04:29:29.043Z] goal creado y confirmado: tg_bt4yhaen1rmvg6p2n4 (active)
 ```
 
 El orden lo decide la prioridad, no el orden de la lista: el backlog declarado
@@ -748,27 +751,30 @@ propuesta no se queda para el final ni se salta.
 
 Y el escenario de exploración, que ya no puede dar por hecho que el trabajo
 llega por la exploración, porque con el plugin instalado el agente puede
-usar la herramienta de propuestas:
+usar la herramienta de propuestas. En el ciclo de la conduccion unica el
+trabajo llego por la exploracion y lo encadeno el supervisor; el recibo
+completo esta en la seccion 7:
 
 ```text
-PASA · se encadeno un Goal sin trabajo marcado (origen: propuesta)
+PASA · se encadeno un Goal sin trabajo marcado (origen: exploracion)
 PASA · el sistema pidio buscar trabajo
-PASA · el Goal viene de una fuente que investigo (propuesta)
-PASA · su evidencia senala a un fichero real (src/fechas.ts)
+PASA · el Goal viene de una fuente que investigo (exploracion)
+PASA · su evidencia senala a un fichero real (NOTAS.md, src/fechas.ts)
+PASA · el supervisor encadeno el objetivo (tg_o4ric84264mvg6ysq8)
+PASA · no se encadeno el mismo trabajo dos veces (1)
 ```
 
 Fragmento literal del escenario de exploración, que es el que ejercita la
 búsqueda de trabajo con el modelo:
 
 ```text
-[23:06:02.949Z] sin trabajo elegible: se pide una exploracion acotada del workspace
-[23:09:19.346Z] la exploracion aporto 3 candidato(s): la mision continua
-[23:09:22.350Z] decision: create - NOTAS.md termina con 'Hay que escribirla y cubrirla
-                con una prueba' y no existe ningún fichero de test en el repo. Sin
-                congelar el reloj la comprobación sería dependiente de la hora real y
-                podría fallar justo en el límite de medianoche; `node:test` lo resuelve
-                con `mock.timers.enable({ apis: ['Date'], now: fecha })` y
-                `mock.timers.reset()` en `finally` (verificado funcionando en Node 25.9).
+[2026-10-20T04:36:00.433Z] sin trabajo elegible: se pide una exploracion acotada del workspace
+[2026-10-20T04:36:59.555Z] la exploracion aporto 2 candidato(s): la mision continua
+[2026-10-20T04:37:02.559Z] decision: create - NOTAS.md pide expresamente "cubrirla con una
+                prueba" y el repositorio no contiene ningún fichero de prueba ni runner
+                configurado (solo existen goal-compass.json, NOTAS.md y src/fechas.ts), así
+                que a día de hoy no hay ninguna forma de comprobar que la implementación de
+                la tarea 0 funciona o deja de lanzar la excepción.
 ```
 
 Ese texto no lo escribió el sistema: lo escribió **el modelo**, leyendo el
@@ -779,26 +785,197 @@ Y el del freno de gasto, que es el que se encontró **de forma natural** al
 agotarse el presupuesto:
 
 ```text
-[23:05:57.552Z] decision: park - presupuesto de la mision agotado (71708 de 1 tokens); la mision sigue viva
-[23:05:57.561Z] mision en parked: presupuesto de la mision agotado (71708 de 1 tokens); la mision sigue viva
+[2026-10-20T04:35:55.362Z] decision: park - presupuesto de la mision agotado (87570 de 1 tokens); la mision sigue viva
+[2026-10-20T04:35:55.379Z] mision en parked: presupuesto de la mision agotado (87570 de 1 tokens); la mision sigue viva
 ```
 
 Y el de la cadena, donde se ve que el trabajo siguiente arranca solo en cuanto
 el anterior se completa:
 
 ```text
-[22:55:18.211Z] decision: create - trabajo pendiente de la cadena
-[22:55:18.360Z] goal creado y confirmado: tg_4c6zpza99bmvfurbh2 (active)
-[22:57:54.544Z] goal completado registrado: tg_4c6zpza99bmvfurbh2 (complete(verifier_met))
-[22:57:54.552Z] decision: create - trabajo pendiente de la cadena
-[22:57:54.607Z] goal creado y confirmado: tg_czxq3otv0ymvfuuo3n (active)
+[2026-10-20T04:25:01.272Z] decision: create - trabajo pendiente de la cadena
+[2026-10-20T04:25:01.389Z] goal creado y confirmado: tg_ddbwd4dfs7mvg6jc6e (active)
+[2026-10-20T04:27:19.525Z] goal completado registrado: tg_ddbwd4dfs7mvg6jc6e (complete(verifier_met))
+[2026-10-20T04:27:19.532Z] decision: create - propuesto durante la sesion
+[2026-10-20T04:27:19.620Z] goal creado y confirmado: tg_ijkwimrygzmvg6mauz (active)
+[2026-10-20T04:29:28.839Z] decision: create - trabajo pendiente de la cadena
+[2026-10-20T04:29:29.043Z] goal creado y confirmado: tg_bt4yhaen1rmvg6p2n4 (active)
 ```
 
 Estos escenarios se ejecutan **con el transporte ACP propio**, sin ninguna
 dependencia externa: la reescritura del transporte no cambió el comportamiento
 observable, y los cinco escenarios lo confirman contra el host real.
 
-## 7 · Lo que NO se ha ejecutado
+## 7 · Una misión, un conductor — **PASADO**
+
+### 7.1 El hueco que quedó abierto en el ciclo anterior
+
+El ciclo v0.6.1 cerró con una anotación honesta en su propia evidencia: en la
+UAT **convivían dos manos encadenando trabajo**, y el objetivo del escenario
+`exploration` lo había encadenado el hook, no el supervisor. El escenario
+demostraba que el producto encuentra trabajo real y lo encadena; no demostraba
+que lo hiciera el camino que se quería medir.
+
+No era un detalle de redacción. Mirando el código, el problema era de diseño:
+
+- el hook y el supervisor son **la misma maquinaria** (`supervisor.step()`)
+  sobre el mismo journal;
+- el journal se escribe de forma atómica, pero **sin compare-and-swap**: dos
+  procesos pueden escribir el uno después del otro;
+- los dos ven el objetivo terminado **en el mismo instante** — el cierre de
+  turno del agente coincide con el sondeo del supervisor — así que los dos
+  deciden crear y se crean dos objetivos para el mismo trabajo. Uno se queda
+  huérfano y sus tokens se pierden;
+- y el hook **reescribía el journal entero** en cada cierre de turno, aunque no
+  tuviera nada que escribir, además de **abrir una sesión del host** para
+  hacerlo.
+
+El kit de especificación de v0.2 ya pedía «mantener un solo writer». Ese
+invariante era cierto para el **fichero** y falso para la **decisión**, que es
+justo lo que se duplica.
+
+### 7.2 La regla que lo hace literal
+
+Una misión la conduce un camino, y el otro se aparta. Tres piezas, y las tres
+hacen falta:
+
+| Pieza | Qué resuelve |
+|---|---|
+| **La declaración** (`"driver"` en el fichero de misión) | Si está, es la ley: el otro camino se aparta y dice por qué |
+| **El mando** (arrendamiento de 5 minutos) | Sin declaración, lo toma el primero que actúa; caduca, así que un proceso muerto no ata la misión |
+| **El candado** (`chain.lock`, creado en exclusiva) | La ventana de encadenado es excluyente: dos vías no pueden crear a la vez |
+
+Y una cuarta, que es la que faltaba de verdad: **apartarse es no tocar nada**.
+El camino que no conduce no abre el host, no escribe en el journal y no deja el
+estado a medias. Antes, «no encadenar» significaba «encadenar menos cosas»,
+que no es lo mismo.
+
+### 7.3 La prueba, con el host real y las dos manos
+
+Dos misiones idénticas, con el plugin instalado, en el mismo host y con el
+mismo encargo para el agente. Lo único que cambia es la declaración.
+
+**Caso A — la misión declara `"driver": "plugin"`.** El hook conduce: toma el
+mando, persiste la intención y crea el objetivo.
+
+```text
+$ ls ~/.local/state/goal-compass/ | grep conductor
+prueba-conductor-plugin
+
+$ cat ~/.local/state/goal-compass/prueba-conductor-plugin/journal.json
+  "driver": "plugin",
+  "driverAt": 1792470194070,
+  "intents": [("nota-plugin", "committed", "tg_khug50zeamvg6h4ja")]
+```
+
+**Caso B — la misma misión declarando `"driver": "supervisor"`.** El hook
+conduce… no: el hook se aparta, y al apartarse no deja ni rastro:
+
+```text
+$ ls ~/.local/state/goal-compass/ | grep conductor
+prueba-conductor-supervisor      ← no aparece
+
+$ cat ~/.local/state/goal-compass/prueba-conductor-supervisor/journal.json
+cat: ...: No existe el fichero o el directorio
+```
+
+El estado durable de esa misión **no existe**. No hay journal, no hay
+intención, no hay sesión abierta contra el host: el camino que no conduce no
+toca nada. Esa es la diferencia entre «no encadenar» y «no existir» para el
+resto del sistema.
+
+### 7.4 El arnés ya no mide otro sistema
+
+El arnés de aceptación escribía la declaración de la misión en `mission.json`,
+que es el nombre que usa la línea de órdenes. El plugin, en cambio, busca la
+suya en `goal-compass.json`, que es el nombre documentado para el repositorio
+donde se quiere encadenar. Con el nombre equivocado, **el hook nunca encontraba
+la misión**: no se apartaba por la declaración, sencillamente no existía para
+él. La prueba pasaba, pero midiendo menos de lo que parecía.
+
+Ahora el arnés escribe el fichero con el nombre real del producto, así que la
+vía que se aparta es la vía de verdad. Y el escenario `exploration` comprueba
+dos cosas que antes no comprobaba:
+
+- **que el supervisor encadenó el objetivo** (su registro lo nombra; el del
+  hook no);
+- **que el trabajo no se encadenó dos veces** (una misión, un objetivo).
+
+### 7.5 La comprobación permanente, y que muerde
+
+La regla del apartarse tiene su prueba en la suite permanente, y se ha
+demostrado que **muerde**: con el host abierto en el camino que no debe abrirlo,
+la prueba falla.
+
+```text
+$ npx vitest run test/ownership.test.ts
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed (9)
+```
+
+Sin la corrección, el camino apartado abría una sesión del host y escribía el
+journal. Con ella, no abre el host, no crea el estado y dice por qué se aparta.
+
+### 7.6 Lo que la aceptación midió esta vez
+
+Los cinco escenarios, con sus comprobaciones:
+
+| Escenario | Comprobaciones | Resultado |
+|---|---|---|
+| `chain` | 12 | Tres objetivos encadenados sin intervención; el del medio llega por el canal de propuestas y se encadena en su momento; 102 105 tokens medidos |
+| `recovery` | 4 | Un fallo entre crear y confirmar se reconcilia sin duplicar |
+| `pause` | 3 | La orden de pausa detiene el trabajo en curso y la de continuar lo reanuda |
+| `budget` | 3 | Agotado el presupuesto (87 570 tokens), la cadena se detiene sin crear otro objetivo |
+| `exploration` | 6 | Sin backlog ni pendientes marcados, el sistema pide buscar trabajo, encuentra trabajo real y **lo encadena el supervisor**, con evidencia que señala a ficheros que existen, y sin encadenar el mismo trabajo dos veces |
+
+El escenario que cerraba el hueco:
+
+```text
+=============== RECIBO · exploration ===============
+Sin backlog ni pendientes marcados, el sistema encuentra trabajo real y lo encadena
+workspace: /tmp/gcl-exploration-shXWmJ
+mision:    uat-exploration-1792470955966
+--- comprobaciones ---
+PASA · se encadeno un Goal sin trabajo marcado (origen: exploracion)
+PASA · el sistema pidio buscar trabajo
+PASA · el Goal viene de una fuente que investigo (exploracion)
+PASA · su evidencia senala a un fichero real (NOTAS.md, src/fechas.ts)
+PASA · el supervisor encadeno el objetivo (tg_o4ric84264mvg6ysq8)
+PASA · no se encadeno el mismo trabajo dos veces (1)
+==========================================================
+```
+
+Las dos últimas comprobaciones son nuevas, y son las que cierran el hueco:
+
+- **«el supervisor encadenó el objetivo»** distingue quién lo hizo. El
+  supervisor lo anuncia con su propia frase y el hook con la suya; el registro
+  del escenario dice cuál de las dos nombra ese objetivo.
+- **«no se encadenó el mismo trabajo dos veces»** es el invariante del ciclo,
+  comprobado: una misión, un objetivo.
+
+Y la exploración, que es la única fuente de trabajo que no viene de una lista
+escrita a mano, sigue siendo la que decide:
+
+```text
+[2026-10-20T04:36:59.555Z] la exploracion aporto 2 candidato(s): la mision continua
+[2026-10-20T04:37:02.559Z] decision: create - NOTAS.md pide expresamente "cubrirla con una
+                prueba" y el repositorio no contiene ningún fichero de prueba ni runner
+                configurado (solo existen goal-compass.json, NOTAS.md y src/fechas.ts), así
+                que a día de hoy no hay ninguna forma de comprobar que la implementación de
+                la tarea 0 funciona o deja de lanzar la excepción.
+[2026-10-20T04:37:02.568Z] intencion persistida: exploracion:1:Añadir una prueba automatizada que cubra -> 52ef6294-26a0-4793-ba04-027407fc43a1
+[2026-10-20T04:37:02.684Z] goal creado y confirmado: tg_o4ric84264mvg6ysq8 (active) - Añadir una prueba automatizada que cubra `exportar()` de src/fechas.ts, con una c
+```
+
+Ese texto no lo escribió el sistema: lo escribió **el modelo**, leyendo el
+repositorio.
+
+Un detalle del propio log que confirma el arreglo del arnés: el modelo enumera
+lo que ve en el workspace y nombra **`goal-compass.json`**. Antes, el fichero
+de la declaración se llamaba `mission.json` y el plugin no lo encontraba: la
+vía que se aparta era una vía que no existía.
+
+## 8 · Lo que NO se ha ejecutado
 
 - **El plugin no se ha probado en la interfaz gráfica.** La validación se ha
   hecho con `mcode exec`, que es la misma ruta de hooks pero sin pantalla.

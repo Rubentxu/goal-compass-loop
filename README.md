@@ -189,6 +189,7 @@ El supervisor usa un `mission.json` **fuera del repositorio analizado**:
   "explorationEnabled": true,
   "explorationCooldownMs": 1800000,
   "allowRemoteWrite": false,
+  "driver": "supervisor",
   "backlog": [
     {
       "candidateId": "parser-terraform-edges",
@@ -233,6 +234,14 @@ El supervisor usa un `mission.json` **fuera del repositorio analizado**:
   alcance automático. El supervisor no tiene ninguna ruta que escriba fuera
   del repositorio; lo que hace esta bandera es llevar el límite de la misión
   hasta el agente, que es el único que puede publicar.
+- `driver` dice qué camino conduce la misión: `"supervisor"` (el bucle) o
+  `"plugin"` (el cierre de turno del agente). **Sin declararlo, lo toma el
+  primero que actúa** y el otro se aparta. Declarelo cuando tenga el plugin
+  instalado y también vaya a lanzar el supervisor, o cuando quiera que el
+  comportamiento no dependa del orden de arranque. La opción vale igual en el
+  fichero del plugin (`goal-compass.json`) y en el de la línea de órdenes: el
+  camino que no conduce **no abre el host ni escribe en el estado**, se aparta
+  entero.
 
 El backlog se relee del fichero en cada ciclo: si añades un candidato mientras
 la misión está `parked`, el supervisor lo detecta y reanuda solo.

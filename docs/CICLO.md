@@ -330,6 +330,69 @@ creación se confirma con una lectura posterior—, pero la lección es clara: e
 plugin y el supervisor son **vías alternativas** de encadenar trabajo, y en una
 instalación real hay que elegir una.
 
+### 3.13 Una misión, un conductor
+
+El ciclo anterior lo dejó escrito como una curiosidad: en la UAT había dos
+manos encadenando trabajo. Esta vez se ha colocado en su sitio, porque no era
+una curiosidad sino un **agujero de diseño**.
+
+El problema, dicho sin rodeos. Hay dos caminos que pueden encadenar objetivos
+sobre la misma misión:
+
+- el **supervisor**, que mira en bucle y crea el siguiente cuando el objetivo
+  en curso termina;
+- el **hook del plugin**, que crea el siguiente cuando el agente cierra el
+  turno.
+
+Los dos escriben en el mismo journal y ven el objetivo terminado **en el
+mismo instante**: el cierre de turno del agente ocurre justo cuando el
+supervisor lo nota en su siguiente sondeo. Sin una regla que los separe, los
+dos deciden crear y se crean dos objetivos para el mismo trabajo. Uno se queda
+huérfano y sus tokens se pierden.
+
+Lo que el kit de especificación pedía era «un solo escritor». Ese invariante
+era cierto para el **fichero**, que se escribe de forma atómica, pero no para
+la **decisión**, que es justo lo que se duplica. Y hay una segunda mitad: el
+hook reescribía el journal entero en cada cierre de turno, aunque no tuviera
+nada que hacer, y eso puede pisar lo que el supervisor acaba de escribir.
+
+La solución tiene cuatro piezas, y las cuatro hacen falta:
+
+1. **La declaración.** El fichero de misión puede decir quién la conduce:
+   `"driver": "supervisor"` o `"driver": "plugin"`. Si lo dice, es la ley y el
+   otro camino se aparta sin tocar nada.
+2. **El mando.** Sin declaración, lo toma el primero que actúa. Es un
+   *arrendamiento*: caduca a los cinco minutos, así que un proceso muerto no
+   puede dejar la misión atada.
+3. **El candado.** Aunque el mando se reparta bien, la ventana de encadenado se
+   protege con un candado exclusivo: dos vías no pueden crear a la vez. Y el
+   candado también caduca, por el mismo motivo.
+4. **Apartarse es no tocar nada.** El camino que no conduce no abre el host, no
+   escribe en el journal y no deja el estado a medias. Esto no estaba en el
+   diseño inicial, y era el fondo del asunto: antes, «no encadenar» significaba
+   «encadenar menos cosas», y el hook seguía abriendo una sesión del host y
+   reescribiendo el journal entero en cada cierre de turno. Podía pisar lo que
+   el supervisor acababa de escribir.
+
+Y el efecto colateral que más importa: **las pruebas de aceptación ahora pueden
+declarar su conductor**, así que miden un solo camino. Antes, con el plugin
+instalado, el hook se adelantaba y el escenario `exploration` medía el hook en
+vez del supervisor. Ese hueco, que quedó abierto en el ciclo anterior, queda
+cerrado.
+
+Y salió de ahí una lección sobre el arnés que merece su propio párrafo,
+porque es la segunda vez que ocurre. **El arnés escribía la declaración de la
+misión con un nombre que el plugin no busca.** La línea de órdenes usa el
+fichero que le indiques; el plugin busca la declaración en el repositorio con
+su nombre. Con el nombre equivocado, el hook no se apartaba por la declaración:
+sencillamente no encontraba la misión. La prueba pasaba, pero midiendo menos
+de lo que parecía. El arreglo es de una línea, y la lección no: **una prueba
+que monta las cosas a su manera está probando su manera, no la del producto**.
+
+La lección final: **«un solo escritor» no es una frase sobre ficheros, es una
+frase sobre decisiones**. Y una regla que depende del orden de arranque no es
+una regla, es una suerte.
+
 ## 4. Cómo se usa
 
 ### Con el plugin (lo recomendado)
