@@ -1791,3 +1791,192 @@ el hecho de que el diagnóstico no escribe en el proyecto que audita.
   cuenta de «6,2 segundos para una sesión de 22 MB» viene de la sesión de
   este repositorio, pero cargarla en un proceso vivo para ver que aguanta no se
   ha hecho.
+- **El bucle completo con un agente de verdad se ha ejecutado una vez de
+  punta a punta.** En la sesión real por ACP de la sección 16 el objetivo se
+  creó, el host lo entregó en un turno propio, el agente leyó el resultado de
+  sus herramientas, propuso el trabajo siguiente, cerró el objetivo y el
+  verificador del host lo aceptó. Lo que **no** se ha repetido es ese ciclo
+  muchas veces seguidas en la misma sesión: una vez es un indicio, no una
+  garantía.
+- **No se ha mirado la interfaz gráfica del plugin.** Se ha probado por ACP,
+  que es la misma ruta de hooks, pero sin pantalla. Lo que el plugin pinta en
+  pantalla —si pinta algo— no se ha visto.
+- **El panel gráfico no se ha buscado con la misma compañía que el resto.**
+  Mirando el manifiesto del host 0.6.12 se sabe que un plugin de terceros no
+  tiene superficie gráfica (la sección 7 del roadmap lo cuenta), pero no se ha
+  intentado ninguna de las vías que quedan: una página HTML local, o una
+  integración con las superficies de texto.
+
+## 16 · El agente que trabajaba a ciegas
+
+### 16.1 El síntoma
+
+Una sesión real por ACP, con un agente de verdad y una misión de dos
+objetivos comprobables. El primer objetivo se creó en 103 ms y el agente lo
+recibió. A partir de ahí, todo lo que el agente hizo fue a ciegas:
+
+```text
+Tool-result delivery seam is closed.
+```
+
+Veintitrés llamadas seguidas —`get_goal`, `read`, `write`, `bash`, `grep`,
+`task`— y ni un solo resultado. El agente siguió intentándolo con mas
+variantes: escribir el fichero con la herramienta `write`, volver a escribirlo
+con `printf`, pedir a un subagente que lo comprobara, releer un fichero de
+evidencia que el mismo habia dejado en disco. Todo con el mismo resultado.
+
+Lo que duele del caso no es el error: es lo que vino despues. El agente
+redactó su cierre afirmando que el fichero existia con tres bytes, y lo
+afirmaba con una seguridad que no podia tener: **no habia leido ni un solo
+resultado**. La escritura si que habia ocurrido —la herramienta ejecuta aunque
+su resultado no llegue—, asi que en esa occasion la afirmacion(resulto
+correcto) coincidio con la realidad(no verificada). El agente no lo sabia: no
+tenia forma de saberlo.
+
+### 16.2 Lo que se midió
+
+| | Antes | Despues |
+|---|---|---|
+| Resultados entregados tras el encadenado | 0 de 23 | 112 de 112 |
+| Errores de entrega | 23 | 0 |
+| Tokens gastados en el objetivo | 51 585 | — |
+
+### 16.3 La causa, en el host
+
+El error no es del plugin: es de como el host entrega el resultado de una
+herramienta. En el host de MCode 0.6.12, el estado del turno tiene una fase, y
+esa fase decide si una herramienta puede devolver algo:
+
+```text
+// fragments/chunk-47KWM23C.js
+function ECr(e, t) {                 // abrir la entrega de resultados
+  let n = Xm(e, t);
+  return !n || n.phase !== "running" ? !1 : (n.toolResultTailOpen += 1, !0);
+}
+```
+
+Y el cierre del turno pone esa fase en `closing` **antes** de que corra el
+hook:
+
+```text
+function cxt(e, t, n) {
+  ...
+  r.phase = "closing",
+  { closed: !0 }
+}
+```
+
+El hook `Stop` corre despues. Si pide continuar el turno, el host le inyecta
+un mensaje nuevo y el turno sigue, pero **la fase ya no vuelve a `running`**.
+La entrega de resultados no se reabre. De ahi el mensaje: el host ya no puede
+entregar el resultado de la herramienta.
+
+El orden importa: el fallo aparece **en el mismo instante** en que el hook
+inyecta su continuacion, antes de que empiece el turno siguiente.
+
+### 16.4 El arreglo
+
+El plugin deja de entregar el objetivo por su cuenta.
+
+El host ya tiene su propia machinery de objetivos: cuando hay un objetivo
+activo, lo encola y lo entrega en un turno propio, con su propio texto de
+arranque (`Continue working toward the active thread goal`). Ese turno es un
+turno de verdad, con su lease y con su fase en `running`: el agente trabaja con
+sus herramientas.
+
+Asi que el hook hace dos cosas y ninguna mas:
+
+1. Crea el objetivo, como siempre.
+2. **No dice nada.** Devuelve la salida vacia y deja que el turno se cierre.
+
+Lo que el plugin tenia que contarle al agente —la evidencia, el criterio de
+cierre, el contexto de la mision, el limite de publicacion— viaja ahora
+**dentro del objetivo**, que es lo unico que el host lleva al agente cuando
+encadena un objetivo nuevo. Lo que queda fuera, no llega.
+
+### 16.5 La prueba, en rojo y en verde
+
+La prueba real es la de la seccion 16.1: una sesion ACP con un agente de
+verdad, con el hook instalado y el host de verdad. Con el arreglo, las 112
+llamadas que hace el agente en el turno del objetivo devuelven su resultado.
+
+En el arnés, el contrato cambio de sitio y las pruebas lo dicen: el hook ya
+no devuelve una decision de `block`, y el objetivo que recibe el host es el que
+lleva el limite, el contexto y las instrucciones de trabajo.
+
+## 17 · El proceso vivo que preguntaba a un host ocupado
+
+### 17.1 El síntoma
+
+En una sesion real, el hook `Stop` agotaba su tiempo en **todos** los turnos:
+
+```text
+WARN: [] Plugin hook command failed open
+  {"code":"HOOK_TIMEOUT","pluginName":"goal-compass",
+   "sourcePath":"hooks/auto-continue.json","event":"Stop"}
+```
+
+El hook `Stop` es el latido de la cadena: si no dice nada, la cadena no
+encadena nada.
+
+### 17.2 La causa
+
+El proceso vivo existe para que el hook sea rapido —responde en milisegundos
+porque ya tiene la sesion cargada en el host—. Pero no guardaba el objetivo:
+cada pregunta era una ida y vuelta al host.
+
+Y esa ida y vuelta es justamente lo que se colgaba:
+
+1. El estado del objetivo solo existe en la memoria del host.
+2. Mientras el hook `Stop` corre, el host esta **dentro** de `finishTurn`,
+   bloqueado esperando al hook.
+3. El proceso vivo pregunta al host, el host no puede responder, el proceso
+   vivo agota sus 7 s, el hook cae al camino de reserva —abrir un host nuevo y
+   cargarle la sesion: 9,5 s— y el host corta el hook a los 10 s.
+
+El componente que deberia evitar el atasco era el que se atascaba. Y no era un
+problema de un proyecto: le pasaba a toda sesion que usara la cadena.
+
+### 17.3 El arreglo
+
+El proceso vivo **guarda el objetivo** y responde con lo que sabe:
+
+- Al cargar la sesion —que es cuando el host esta libre— se pregunta una vez
+  cual es el objetivo. A partir de ahi manda el aviso de cambio
+  (`mcode/session/goal_update`) que el host ya emitia y que el adaptador ya
+  escuchaba.
+- El `read` se responde con lo que se sabe. Si no se sabe nada, se pregunta con
+  un **tope de 400 ms**; si tampoco contesta, se responde con un error y **no**
+  con «no hay objetivo». Callar afirmaria algo que no se sabe, y podria crear
+  un objetivo que ya existe.
+
+Ademas, el objetivo recien creado se guarda en el acto: el aviso de cambio
+llega despues, y hasta que llega, leer tiene que dar el objetivo nuevo. Dar el
+anterior —que ademas puede estar completo— habilita encadenar otra vez sin
+querer.
+
+### 17.4 La prueba, en rojo y en verde
+
+La prueba es el caso que rompe la cadena: el host de la sesion **muerto**,
+que es lo que pasa mientras el hook corre.
+
+```text
+[goal-compass] el proceso vivo responde: el objetivo se creara por ahi
+[goal-compass] decision: wait - goal activo: esperando a que termine
+ms=1410
+```
+
+El hook decide bien sin poder preguntar a nadie, y cabe en el margen.
+
+En el arnés, el caso nuevo es explicito: el host falso aprende a congelarse
+(`FAKE_ACP_FREEZE_AFTER_MS`), y la prueba pregunta al proceso vivo cuando su
+host ya no contesta. Sin el arreglo, el proceso vivo se queda sin respuesta y
+la prueba se cuelga —que es el modo de fallo real—. Con el arreglo, responde
+con lo que sabe.
+
+Y el objetivo recien creado se lee al instante, sin esperar al aviso de
+cambio. La prueba se ve en rojo antes que en verde:
+
+```text
+AssertionError: expected 'tg_fake_1' to be 'tg_fake_2'
+```

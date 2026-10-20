@@ -470,26 +470,50 @@ hechos, cuánto queda, quién conduce— hay que ir a leer un fichero a mano.
 
 **Lo que se puede y lo que no.** Un plugin no dibuja panels: la interfaz del
 host es del host, y lo que un plugin aporta son herramientas, recursos,
-prompts, skills y hooks. Pero el host sí tiene superficies donde el progreso
-se ve:
+prompts, skills y hooks. Eso está comprobado en el manifiesto del host, no
+supuesto. En MCode 0.6.12 el manifiesto admite exactamente estas claves:
+
+```text
+$schema, schemaVersion, name, displayName, version, description, author,
+icon, darkIcon, category, exampleQueries, apps, mcpServers, skills, hooks,
+hostBindings
+```
+
+Hay un `apps`, y es la única clave que se parece a una superficie gráfica: las
+**Mini Apps**. Pero el host solo las carga para los plugins **oficiales**:
+
+```text
+c = e.source === "OFFICIAL" ? await Promise.all(i.apps.map(w => N7e(r, w))) : []
+```
+
+Un plugin de terceros las declara y no las tiene. Y la otra puerta, las
+`hostBindings`, tampoco: su lista de superficies permitidas tiene un único
+valor, `interactive` —el chat—, así que un enlace al host no puede abrir una
+vista aparte.
+
+Lo que sí quedan son superficies donde el progreso se ve:
 
 - la **lista de tareas** del modelo, que se ve en pantalla;
 - los **prompts** del servidor de herramientas, invocables con `/`;
 - los **recursos** del servidor de herramientas, que se pueden abrir.
 
 La vía real es una: que la cadena sabe decir, en texto, cómo va el ciclo; y
-que ese texto llegue a una de esas superficies.
+que ese texto llegue a una de esas superficies. Fuera del host queda una
+opción complementsaria: una página HTML que el plugin escribe en local y que
+el usuario abre en el navegador, con el estado del ciclo en vivo.
 
 **Evidencia.**
 
 - `src/plugin/mcp-server.ts` — el estado devuelve texto plano con el estado y
   el trabajo disponible, pero sin el objetivo en curso ni la cadena de
   objetivos hechos y pendientes.
-- `src/plugin/auto-continue.ts` — la respuesta de continuación dice qué
-  objetivo toca, pero no qué se ha hecho ni qué queda por delante.
-- El manifiesto del plugin admite herramientas, recursos, prompts, skills y
-  hooks, y ninguna superficie de panel: no hay un punto de extensión para
-  dibujarlo.
+- `src/plugin/auto-continue.ts` — el objetivo que se encadena lleva el
+  contexto de la misión, pero no el objetivo en curso ni lo que queda por
+  delante.
+- Manifiesto del host 0.6.12 (`chunks/chunk-5ADYFF2U.js`): las claves
+  admitidas son las de arriba; `apps` solo se carga para plugins oficiales; y
+  `hostBindings[].allowedSurfaces` solo admite `interactive`. No hay ningún
+  punto de extensión para dibujar un panel.
 
 **Condición de cierre.**
 

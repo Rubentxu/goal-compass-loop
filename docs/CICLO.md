@@ -780,6 +780,41 @@ Los dos tenían razón, y entre los dos no había un contrato. La lección no es
 ha escrito el campo correcto**, y para eso hace falta algo que mire el
 fichero en crudo y diga qué se pierde.
 
+### 3.21 El agente que trabajaba a ciegas
+
+La cadena encadenaba bien, el objetivo llegaba al agente, y aun así el trabajo
+salía mal. El motivo estaba en el host: cuando el hook `Stop` pide continuar
+el turno, el host le inyecta el mensaje pero **ya no puede entregar el
+resultado de ninguna herramienta** a partir de ahí.
+
+El error era del propio host, y su texto lo dice: `Tool-result delivery seam
+is closed`. Veintitrés llamadas seguidas, ni un resultado. El agente no podía
+leer lo que sus herramientas le devolvían, así que及市场 no podía comprobar lo
+que había hecho —y su informe final lo dijo con una seguridad que no tenía
+derecho a tener.
+
+El arreglo no es del plugin: es **dejar de hacer lo que el host ya hace**. El
+host tiene su propia machinery de objetivos: cuando hay uno activo, lo entrega
+en un turno propio. Ese turno tiene su lease y su fase, y ahí las
+herramientas funcionan. Así que el hook ahora crea el objetivo y **no dice
+nada**: cierra el turno y deja que el host lo entregue.
+
+Lo que el plugin tenía que contarle al agente —la evidencia, el criterio de
+cierre, el contexto, el límite de publicación— viaja dentro del objetivo,
+que es lo único que el host lleva al agente cuando encadena un objetivo
+nuevo. Lo que queda fuera, no llega.
+
+La diferencia medida en una sesión real con un agente de verdad: **0 de 23
+resultados entregados antes, 112 de 112 después.**
+
+### 3.22 El proceso vivo que preguntaba a un host ocupado
+
+El otro fallo era el que se colgaba preguntando al host justo cuando el host no podía responder: mientras el hook `Stop` corre, el host está dentro de `finishTurn`, bloqueado esperando al propio hook. El proceso vivo —que existe para que el hook sea rápido— no guardaba el objetivo, así que cada pregunta era una ida y vuelta a un host ocupado: 7 s de espera, camino de reserva de 9,5 s, y el hook cortado a los 10 s.
+
+Ahora el proceso vivo **guarda el objetivo**: lo pregunta una vez al cargar la sesión —que es cuando el host está libre— y a partir de ahí manda el aviso de cambio que el host ya emitía. Si no sabe cuál es, pregunta con un tope de 400 ms; si el host tampoco contesta, responde con un error y no con «no hay objetivo», porque callar afirmaría algo que no se sabe.
+
+El componente que debía evitar el atasco era el que se atascaba. Y no era un problema de un proyecto: le pasaba a toda sesión que usara la cadena.
+
 ## 4. Cómo se usa
 
 ### Con el plugin (lo recomendado)
