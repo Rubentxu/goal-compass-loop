@@ -242,6 +242,7 @@ y el razonamiento nuevo vive en el cuerpo de la documentación.
 | 4 | El proyecto puede partir del árbol sin escribirlo a mano | media | — |
 | 5 | El ejemplo de declaración está al día | baja | — |
 | 6 | Las dos decisiones que más cambiaron el producto tienen su ADR | media | — |
+| 7 | El ciclo activo, a la vista | media-alta | 2 |
 
 ---
 
