@@ -1,6 +1,6 @@
 {
   "name": "goal-compass-loop",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Supervisor externo que encadena Goals nativos de MCode via ACP extension mcode/session/goal/*",
   "type": "module",
   "bin": {

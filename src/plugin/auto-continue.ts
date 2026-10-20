@@ -27,12 +27,13 @@ import type { Journal, TransitionIntent } from '../core/types.js';
  * medias una sesion del host. Es mejor pararse antes y dejar la mision como
  * estaba: el siguiente turno lo intentara de nuevo.
  *
- * El margen tiene que estar por encima del trabajo real —reanudar la sesion
- * del host y crear el objetivo lleva unos segundos— y por debajo del tiempo
- * que el host da al hook. Si el hook se pasa, el host lo tira y el turno se
- * queda sin continuacion: peor que no encadenar nada.
+ * El host da a un hook de plugin diez segundos como maximo, y el manifiesto
+ * no puede pedir mas. El margen tiene que estar por encima del trabajo real
+ * —arrancar el host, reanudar la sesion y crear el objetivo lleva unos
+ * segundos— y por debajo de ese limite. Si el hook se pasa, el host lo tira
+ * y el turno se queda sin continuacion: peor que no encadenar nada.
  */
-const DEADLINE_MS = 45_000;
+const DEADLINE_MS = 9_500;
 
 export interface HookEvent {
   hook_event_name?: string;
