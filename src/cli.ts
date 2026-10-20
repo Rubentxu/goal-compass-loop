@@ -17,6 +17,8 @@ import { FileControlPort } from './adapters/control.js';
 import { FileJournal, journalPath } from './adapters/journal.js';
 import { loadMissionConfig } from './adapters/mission.js';
 import { openMission, ensureMissionState } from './runtime.js';
+import { loadTree, validateTree } from './adapters/tree.js';
+import { ensureWorkdir, treeDirFor } from './adapters/workdir.js';
 import {
   defaultMarketplaceDir,
   installPlugin,
@@ -40,6 +42,7 @@ const USAGE = `Goal Compass Loop · supervisor de Goals nativos
   goal-compass status --mission <mission-id>      muestra el estado de la mision
   goal-compass pause|resume|stop --mission <id>   ordenes del usuario
   goal-compass probe  --workspace <dir>           comprueba la extension ACP del host
+  goal-compass tree   --workspace <dir>           prepara el arbol del proyecto y lo valida
   goal-compass install-skill                       instala la skill goal-compass
   goal-compass install-plugin                      ensambla el plugin de MCode
 `;
@@ -194,6 +197,45 @@ async function cmdProbe(values: Options): Promise<void> {
   }
 }
 
+/**
+ * Prepara el arbol de decision de un proyecto y lo cuenta.
+ *
+ * Deja el directorio de trabajo en su sitio, con su entrada en `.gitignore`, y
+ * dice que arbol se esta siguiendo: el del proyecto si tiene el suyo, el de la
+ * skill si no. Un arbol con problemas se dice y se cuenta; no se arregla solo.
+ */
+async function cmdTree(values: Options): Promise<void> {
+  const workspace =
+    typeof values.workspace === 'string' ? values.workspace : process.cwd();
+
+  const workdir = ensureWorkdir(workspace);
+  logger.info(
+    `directorio de trabajo: ${workdir.path}` +
+      (workdir.created ? ' (creado)' : '') +
+      (workdir.gitignoreAdded ? ' (anadido a .gitignore)' : ''),
+  );
+  logger.info(`ignorado por git: ${workdir.ignored ? 'si' : 'no'}`);
+
+  const fallback = join(resolveSkillSource(), 'graph');
+  const { dir, source } = treeDirFor(workspace, fallback);
+  logger.info(`arbol: ${dir} (${source === 'proyecto' ? 'del proyecto' : 'de la skill'})`);
+
+  const tree = loadTree(dir);
+  const links = [...tree.nodes.values()].reduce((total, node) => total + node.links.length, 0);
+  const control = [...tree.nodes.values()].filter((node) => node.role === 'supervisor').length;
+
+  logger.info(`entrada: ${tree.entry}`);
+  logger.info(`nodos: ${tree.nodes.size} (${tree.nodes.size - control} de agente, ${control} de control)`);
+  logger.info(`enlaces: ${links}`);
+
+  const problems = validateTree(tree);
+  if (problems.length > 0) {
+    for (const problem of problems) logger.warn(problem);
+    throw new Error(`el arbol tiene ${problems.length} problema(s)`);
+  }
+  logger.info('el arbol no tiene problemas');
+}
+
 async function cmdInstallSkill(): Promise<void> {
   const source = resolveSkillSource();
   const dataDir =
@@ -255,6 +297,7 @@ const COMMANDS: Record<string, (values: Options) => Promise<void>> = {
   resume: controlCommand('running'),
   stop: controlCommand('stopped_by_user'),
   probe: cmdProbe,
+  tree: cmdTree,
   'install-skill': cmdInstallSkill,
   'install-plugin': cmdInstallPlugin,
 };

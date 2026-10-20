@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { openMission } from '../runtime.js';
 import { locateMission } from './mission-locator.js';
 import type { Logger } from '../ports.js';
+import type { Journal } from '../core/types.js';
 
 /**
  * Margen que el hook se da a si mismo.
@@ -111,9 +112,10 @@ export async function runAutoContinue(
       if (!outcome.created) return '';
 
       log.info(`objetivo encadenado: ${outcome.created.goalId}`);
+      const state = await runtime.journal.load();
       return JSON.stringify({
         decision: 'block',
-        reason: continuePrompt(outcome.created.objective, mission.config.allowRemoteWrite),
+        reason: continuePrompt(outcome.created.objective, mission.config.allowRemoteWrite, state),
       });
     } catch (err) {
       log.warn(`no se pudo encadenar el objetivo siguiente: ${(err as Error).message}`);
@@ -141,19 +143,64 @@ export async function runAutoContinue(
  * El limite de publicacion de la mision viaja aqui porque el agente es el
  * unico que puede hacer push, publicar o desplegar: si la mision no lo
  * autoriza, el agente tiene que saberlo antes de empezar.
+ *
+ * Y con el limite viaja el contexto, porque un objetivo sin contexto obliga a
+ * rededucir el estado del proyecto en cada turno. La respuesta de continuacion
+ * dice donde esta la mision ahora mismo: cuanto ha hecho, cuanto le queda y
+ * que se esta trabajando.
+ *
+ * La ultima parte es la que cierra el bucle: al terminar, el agente deja el
+ * trabajo siguiente propuesto. Sin eso, la cadena se queda sin fuel en cuanto
+ * la cola se vacia, aunque la mision siga viva.
  */
-function continuePrompt(objective: string, allowRemoteWrite: boolean): string {
+function continuePrompt(
+  objective: string,
+  allowRemoteWrite: boolean,
+  state: Journal | null,
+): string {
   const boundary = allowRemoteWrite
     ? 'La mision autoriza publicar, pero hace falta autorizacion explicita del usuario.'
     : 'La mision no autoriza publicar: no hagas push, ni tag, ni release, ni despliegue.';
   return (
     `La mision continua: el objetivo siguiente ya esta creado y activo.\n` +
     `Objetivo: ${objective}\n\n` +
-    `Trabaja ese objetivo con la skill goal-compass: empieza por graph/index.md, ` +
-    `elige solo el nodo que corresponda y ejecuta una accion pequena y verificable. ` +
-    `Cuando su alcance este probado, cierralo con update_goal(status=complete).\n\n` +
+    `${contextOf(state)}\n` +
+    `Trabaja ese objetivo con la skill goal-compass: empieza por el nodo de ` +
+    `entrada del arbol, elige solo el nodo que corresponda y ejecuta una accion ` +
+    `pequena y verificable. Cuando su alcance este probado, cierralo con ` +
+    `update_goal(status=complete).\n\n` +
+    `Cuando termines, deja el trabajo siguiente: con mission_propose, la evidencia ` +
+    `que lo respalda y como se sabra que esta hecho. Si de verdad no hay trabajo ` +
+    `que quede, dilo con claridad en vez de inventarlo. La cadena sigue mientras ` +
+    `alguien deje trabajo.\n\n` +
     `Limite de la mision: ${boundary}`
   );
+}
+
+/**
+ * El estado de la mision en el momento de la continuacion.
+ *
+ * Es lo que el agente necesita para no empezar a ciegas: que se ha hecho, que
+ * queda y por que la mision esta como esta.
+ */
+function contextOf(state: Journal | null): string {
+  if (!state) return 'Contexto: la mision todavia no tiene historial.';
+
+  const completed = state.goals.filter((goal) => goal.status === 'complete');
+  const tokens = state.goals.reduce((total, goal) => total + goal.tokensUsed, 0);
+  const budget = state.mission.totalTokenBudget;
+  const last = completed[completed.length - 1];
+
+  const lines = [
+    `Contexto de la mision "${state.mission.missionId}":`,
+    `- estado: ${state.mission.status}${state.mission.reason ? ` (${state.mission.reason})` : ''}`,
+    `- objetivos completados: ${completed.length}` +
+      (last ? `; el ultimo fue "${last.objective}"` : ''),
+    `- presupuesto: ${tokens} token(s)${budget !== null ? ` de ${budget}` : ''}`,
+    `- trabajo declarado pendiente: ${state.mission.backlog.length} candidato(s)`,
+  ];
+
+  return lines.join('\n');
 }
 
 /**
