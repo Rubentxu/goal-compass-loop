@@ -101,6 +101,27 @@ describe('hook de continuacion', () => {
     expect(decision.reason).toContain('no autoriza publicar');
   });
 
+  it('la continuacion lleva el contexto de la mision', async () => {
+    const salida = await runAutoContinue(
+      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
+      { host: HOST, logger: quietLogger },
+    );
+    const decision = JSON.parse(salida) as { reason: string };
+    expect(decision.reason).toContain('Contexto de la mision');
+    expect(decision.reason).toContain('presupuesto');
+    expect(decision.reason).toContain('trabajo declarado pendiente');
+  });
+
+  it('la continuacion pide dejar el trabajo siguiente', async () => {
+    const salida = await runAutoContinue(
+      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
+      { host: HOST, logger: quietLogger },
+    );
+    const decision = JSON.parse(salida) as { reason: string };
+    expect(decision.reason).toContain('mission_propose');
+    expect(decision.reason).toContain('deja el trabajo siguiente');
+  });
+
   it('una mision que autoriza publicar lo dice sin dar permiso por su cuenta', async () => {
     const otro = tempDir('gcl-hook-publica-');
     writeMission(otro, true);
