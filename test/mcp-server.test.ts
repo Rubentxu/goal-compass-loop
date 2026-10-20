@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildMissionTools, handleMessage, resolveWorkspaceDir } from '../src/plugin/mcp-server.js';
 import { findMissionFileUpwards, locateMission } from '../src/plugin/mission-locator.js';
-import { proposalsPath, readProposals } from '../src/adapters/proposals.js';
+import { proposalsPath, readProposals, writeProposal } from '../src/adapters/proposals.js';
 import type { Logger } from '../src/ports.js';
 
 const quietLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
@@ -122,6 +122,7 @@ describe('servidor de herramientas de la mision', () => {
     const text = await callTool(tools, 'mission_propose', {
       objective: 'Escribir la prueba que falta',
       evidence: 'NOTAS.md',
+      doneWhen: ['la prueba existe y pasa'],
     });
     expect(text).toContain('Propuesta registrada');
     expect(readProposals('prueba-mcp')).toHaveLength(1);
@@ -133,9 +134,35 @@ describe('servidor de herramientas de la mision', () => {
     const text = await callTool(tools, 'mission_propose', {
       objective: 'Trabajo sobre un fichero inexistente',
       evidence: 'INVENTADO.md',
+      doneWhen: ['el fichero existe'],
     });
     expect(text).toContain('no señala a ningún fichero');
     expect(readProposals('prueba-mcp')).toHaveLength(0);
+  });
+
+  it('no registra una propuesta sin criterio de cierre', async () => {
+    const tools = buildMissionTools({ cwd: workspace, logger: quietLogger });
+    const text = await callTool(tools, 'mission_propose', {
+      objective: 'Trabajo sin como saber cuando esta hecho',
+      evidence: 'NOTAS.md',
+    });
+    expect(text).toContain('criterio de cierre');
+    expect(readProposals('prueba-mcp')).toHaveLength(0);
+  });
+
+  it('una propuesta sin criterio de cierre no llega a ser trabajo', async () => {
+    writeProposal('prueba-mcp', {
+      candidateId: 'propuesta:sin-criterio',
+      objective: 'Trabajo sin criterio de cierre',
+      whyNow: 'prueba',
+      evidenceRefs: ['NOTAS.md'],
+      doneWhen: [],
+      createdAt: new Date().toISOString(),
+    });
+    const tools = buildMissionTools({ cwd: workspace, logger: quietLogger });
+    const text = await callTool(tools, 'mission_status');
+    expect(text).toContain('Propuestas utilizables: 0');
+    expect(text).toContain('sin-criterio-observable');
   });
 
   it('escribe la orden de pausa en el canal de control', async () => {

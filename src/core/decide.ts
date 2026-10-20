@@ -24,6 +24,27 @@ export interface Rejection {
   detail?: string;
 }
 
+/**
+ * Que le falta a un candidato para poder convertirse en trabajo.
+ *
+ * Son las dos condiciones que no dependen del historial: un candidato sin
+ * evidencia o sin criterio de cierre no es trabajo, hoy ni nunca. El nucleo
+ * las aplica al decidir, y las fuentes de trabajo las comprueban antes de
+ * ofrecer un candidato, para no prometer trabajo que luego se descarta.
+ */
+export type CandidateDefect = 'sin-evidencia' | 'sin-criterio-observable';
+
+/**
+ * Comprueba si un candidato cumple las condiciones minimas para ser trabajo.
+ *
+ * Devuelve el motivo del descarte o `null` cuando el candidato es utilizable.
+ */
+export function candidateDefect(candidate: Candidate): CandidateDefect | null {
+  if (candidate.evidenceRefs.length === 0) return 'sin-evidencia';
+  if (candidate.doneWhen.length === 0) return 'sin-criterio-observable';
+  return null;
+}
+
 const RISK_ORDER: Record<Candidate['risk'], number> = { low: 0, medium: 1, high: 2 };
 
 /**
@@ -158,12 +179,9 @@ export function selectCandidates(snapshot: Snapshot): {
   const rejected: Rejection[] = [];
 
   for (const candidate of snapshot.candidates) {
-    if (candidate.evidenceRefs.length === 0) {
-      rejected.push({ candidateId: candidate.candidateId, reason: 'sin-evidencia' });
-      continue;
-    }
-    if (candidate.doneWhen.length === 0) {
-      rejected.push({ candidateId: candidate.candidateId, reason: 'sin-criterio-observable' });
+    const defect = candidateDefect(candidate);
+    if (defect) {
+      rejected.push({ candidateId: candidate.candidateId, reason: defect });
       continue;
     }
     if (completedIds.has(candidate.candidateId)) {

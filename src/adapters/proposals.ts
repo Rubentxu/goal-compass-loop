@@ -7,12 +7,15 @@
  * objetivos siga siendo el único que escribe el journal.
  *
  * Una propuesta solo se acepta si su evidencia señala a un fichero que
- * existe de verdad. Sin eso, no hay trabajo: solo una intención.
+ * existe de verdad y si dice cómo se sabrá que está hecha. Son las mismas
+ * condiciones que el nucleo exige a cualquier candidato: sin eso, no hay
+ * trabajo, solo una intención.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { candidateKey, type Candidate } from '../core/types.js';
+import { candidateDefect, type CandidateDefect } from '../core/decide.js';
 import type { CandidatePort } from '../ports.js';
 import { stateRoot } from './journal.js';
 
@@ -75,25 +78,56 @@ export function evidenceExists(workspace: string, evidenceRefs: string[]): boole
   });
 }
 
-/** Convierte las propuestas en candidatos que el supervisor puede encadenar. */
+/**
+ * Una propuesta y el motivo por el que todavia no puede ser trabajo.
+ *
+ * `defect` es `null` cuando la propuesta es utilizable tal cual.
+ */
+export interface ProposalVerdict {
+  proposal: Proposal;
+  defect: CandidateDefect | null;
+}
+
+/**
+ * Revisa las propuestas pendientes y explica las que no pueden ser trabajo.
+ *
+ * La evidencia tiene que existir de verdad y hace falta un criterio de cierre
+ * observable: son las mismas condiciones que el nucleo exige a cualquier
+ * candidato, no un filtro propio de este canal.
+ */
+export function reviewProposals(missionId: string, workspace: string): ProposalVerdict[] {
+  return readProposals(missionId).map((proposal) => {
+    if (!evidenceExists(workspace, proposal.evidenceRefs)) {
+      return { proposal, defect: 'sin-evidencia' as const };
+    }
+    return { proposal, defect: candidateDefect(proposalToCandidate(proposal)) };
+  });
+}
+
+/** Convierte una propuesta en el candidato que el supervisor puede encadenar. */
+function proposalToCandidate(proposal: Proposal): Candidate {
+  return {
+    candidateId: proposal.candidateId,
+    objective: proposal.objective,
+    whyNow: proposal.whyNow,
+    evidenceRefs: proposal.evidenceRefs,
+    doneWhen: proposal.doneWhen,
+    scope: 'workspace',
+    risk: 'medium' as const,
+    priority: 5,
+    prerequisites: [],
+    source: 'investigation' as const,
+  };
+}
+
+/** Convierte las propuestas utilizables en candidatos que el supervisor puede encadenar. */
 export function proposalsToCandidates(
   missionId: string,
   workspace: string,
 ): Candidate[] {
-  return readProposals(missionId)
-    .filter((proposal) => evidenceExists(workspace, proposal.evidenceRefs))
-    .map((proposal) => ({
-      candidateId: proposal.candidateId,
-      objective: proposal.objective,
-      whyNow: proposal.whyNow,
-      evidenceRefs: proposal.evidenceRefs,
-      doneWhen: proposal.doneWhen,
-      scope: 'workspace',
-      risk: 'medium' as const,
-      priority: 5,
-      prerequisites: [],
-      source: 'investigation' as const,
-    }));
+  return reviewProposals(missionId, workspace)
+    .filter((verdict) => verdict.defect === null)
+    .map((verdict) => proposalToCandidate(verdict.proposal));
 }
 
 /**

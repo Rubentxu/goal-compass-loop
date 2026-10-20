@@ -22,7 +22,7 @@ import { toMission } from '../adapters/mission.js';
 import {
   evidenceExists,
   proposalsToCandidates,
-  readProposals,
+  reviewProposals,
   writeProposal,
 } from '../adapters/proposals.js';
 import { locateMission, type LocatedMission } from './mission-locator.js';
@@ -88,7 +88,13 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
               'Estado: declarada, todavía sin empezar. La cadena arranca sola en el primer cierre de turno.',
             ];
 
-        lines.push(`Propuestas pendientes: ${readProposals(mission.config.missionId).length}`);
+        const verdicts = reviewProposals(mission.config.missionId, mission.workspace);
+        const usable = verdicts.filter((verdict) => verdict.defect === null);
+        const discarded = verdicts.filter((verdict) => verdict.defect !== null);
+        lines.push(`Propuestas utilizables: ${usable.length}`);
+        for (const verdict of discarded) {
+          lines.push(`- descartada: ${verdict.proposal.objective} (${verdict.defect})`);
+        }
 
         if (available.length === 0) {
           lines.push('Trabajo disponible: ninguno todavía.');
@@ -106,8 +112,8 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
       name: 'mission_propose',
       description:
         'Propón el siguiente objetivo de la misión. La evidencia tiene que ' +
-        'señalar a un fichero que exista en el repositorio; sin eso la ' +
-        'propuesta se descarta.',
+        'señalar a un fichero que exista en el repositorio y hace falta decir ' +
+        'cómo se sabrá que está hecho; sin eso la propuesta se descarta.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -120,10 +126,10 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
           doneWhen: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Cómo se sabe que está hecho.',
+            description: 'Cómo se sabe que está hecho. Al menos un criterio.',
           },
         },
-        required: ['objective', 'evidence'],
+        required: ['objective', 'evidence', 'doneWhen'],
       },
       async run(args): Promise<string> {
         const mission = locate();
@@ -133,6 +139,17 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
         const evidence = String(args.evidence ?? '').trim();
         if (!objective) return 'Falta el objetivo de la propuesta.';
         if (!evidence) return 'Falta la evidencia de la propuesta.';
+
+        const doneWhen = Array.isArray(args.doneWhen)
+          ? args.doneWhen.map((entry) => String(entry).trim()).filter((entry) => entry.length > 0)
+          : [];
+        if (doneWhen.length === 0) {
+          return (
+            'Falta el criterio de cierre de la propuesta: sin al menos un criterio ' +
+            'observable no se puede comprobar que el trabajo esté hecho, y la ' +
+            'propuesta se descartaría. Indica en `doneWhen` cómo se sabrá.'
+          );
+        }
 
         const evidenceRefs = [evidence];
         if (!evidenceExists(mission.workspace, evidenceRefs)) {
@@ -148,15 +165,15 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
           objective,
           whyNow: String(args.whyNow ?? '').trim() || 'Propuesta surgida durante la sesión',
           evidenceRefs,
-          doneWhen: Array.isArray(args.doneWhen) ? args.doneWhen.map(String) : [],
+          doneWhen,
           createdAt: new Date(now()).toISOString(),
         });
 
-        const pending = proposalsToCandidates(mission.config.missionId, mission.workspace);
+        const usable = proposalsToCandidates(mission.config.missionId, mission.workspace);
         return (
           `Propuesta registrada: ${objective}\n` +
           `Evidencia: ${evidence}\n` +
-          `Propuestas utilizables: ${pending.length}\n` +
+          `Propuestas utilizables: ${usable.length}\n` +
           'Se encadenará en el próximo cierre de turno.'
         );
       },
