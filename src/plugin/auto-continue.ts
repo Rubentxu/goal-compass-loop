@@ -12,13 +12,19 @@
  *  - Si algo falla, el turno continua igual. Un plugin nunca deja al
  *    usuario sin respuesta por un problema propio.
  */
-import { realpathSync } from 'node:fs';
+import { realpathSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { AcpGoalAdapter } from '../adapters/acp-goal.js';
+import { KeeperGoalAdapter } from '../adapters/keeper-goal.js';
 import { openMission } from '../runtime.js';
 import { locateMission } from './mission-locator.js';
-import type { Logger } from '../ports.js';
+import { keeperSocketPath } from './keeper-protocol.js';
+import { parseHookEvent, type HookEvent } from './hook-event.js';
+import type { GoalAdapter, Logger } from '../ports.js';
 import type { Journal, TransitionIntent } from '../core/types.js';
+
+export { parseHookEvent };
+export type { HookEvent };
 
 /**
  * Margen que el hook se da a si mismo.
@@ -28,22 +34,12 @@ import type { Journal, TransitionIntent } from '../core/types.js';
  * estaba: el siguiente turno lo intentara de nuevo.
  *
  * El host da a un hook de plugin diez segundos como maximo, y el manifiesto
- * no puede pedir mas. El margen tiene que estar por encima del trabajo real
- * —arrancar el host, reanudar la sesion y crear el objetivo lleva unos
- * segundos— y por debajo de ese limite. Si el hook se pasa, el host lo tira
- * y el turno se queda sin continuacion: peor que no encadenar nada.
+ * no puede pedir mas. El camino normal —preguntar al proceso vivo— dura
+ * milisegundos; el margen cubre el camino de reserva, que es abrir un host
+ * nuevo y cargarle la sesion. Si el hook se pasa, el host lo tira y el turno
+ * se queda sin continuacion: peor que no encadenar nada.
  */
 const DEADLINE_MS = 9_500;
-
-export interface HookEvent {
-  hook_event_name?: string;
-  session_id?: string;
-  cwd?: string;
-  payload?: {
-    stop_hook_active?: boolean;
-    last_assistant_message?: string;
-  };
-}
 
 /** Registro que escribe en la salida de error: la salida normal es del hook. */
 const logger = {
@@ -51,17 +47,6 @@ const logger = {
   warn: (message: string) => process.stderr.write(`[goal-compass] AVISO ${message}\n`),
   error: (message: string) => process.stderr.write(`[goal-compass] ERROR ${message}\n`),
 };
-
-/** Interpreta el evento que el host entrega por la entrada estandar. */
-export function parseHookEvent(raw: string): HookEvent | null {
-  if (!raw.trim()) return null;
-  try {
-    const parsed = JSON.parse(raw) as HookEvent;
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 /** Opciones del disparo de continuacion. */
 export interface AutoContinueOptions {
@@ -96,7 +81,7 @@ export async function runAutoContinue(
   if (!mission) return '';
 
   let runtime: Awaited<ReturnType<typeof openMission>> | undefined;
-  let adapter: AcpGoalAdapter | undefined;
+  let adapter: GoalAdapter | undefined;
   let finished = false;
 
   const work = (async (): Promise<string> => {
@@ -104,16 +89,24 @@ export async function runAutoContinue(
       // El adaptador se construye aqui para poderlo cerrar aunque la mision no
       // llegue a arrancarse: el host es un proceso, y un proceso sin cerrar
       // deja al hook sin terminar nunca.
-      adapter = new AcpGoalAdapter({
-        workspace: mission.config.workspace,
-        sessionId,
-        logger: log,
-        ...(options.host?.command !== undefined ? { command: options.host.command } : {}),
-        ...(options.host?.args !== undefined ? { args: options.host.args } : {}),
-        ...(options.requestTimeoutMs !== undefined
-          ? { requestTimeoutMs: options.requestTimeoutMs }
-          : {}),
-      });
+      //
+      // Se prefiere el proceso vivo: uno que ya tiene la sesion cargada en el
+      // host. Crear el objetivo por ahi cuesta milisegundos, mientras que
+      // abrir un host nuevo y cargarle la sesion cuesta segundos, y esa
+      // carga crece con el historial de la sesion.
+      const keeper = await connectKeeper(sessionId, log, options);
+      adapter =
+        keeper ??
+        new AcpGoalAdapter({
+          workspace: mission.config.workspace,
+          sessionId,
+          logger: log,
+          ...(options.host?.command !== undefined ? { command: options.host.command } : {}),
+          ...(options.host?.args !== undefined ? { args: options.host.args } : {}),
+          ...(options.requestTimeoutMs !== undefined
+            ? { requestTimeoutMs: options.requestTimeoutMs }
+            : {}),
+        });
 
       runtime = await openMission({
         config: mission.config,
@@ -173,6 +166,46 @@ export async function runAutoContinue(
   });
 
   return Promise.race([work, guard]);
+}
+
+/**
+ * Conecta con el proceso vivo de la sesion, si lo hay.
+ *
+ * Devuelve `undefined` cuando no hay nadie escuchando: entonces el hook
+ * abre su propio host, como siempre. No es un fallo: es el camino de
+ * reserva, y sigue siendo valido mientras la sesion no sea muy grande.
+ */
+async function connectKeeper(
+  sessionId: string,
+  log: Logger,
+  options: AutoContinueOptions,
+): Promise<KeeperGoalAdapter | undefined> {
+  const socketPath = keeperSocketPath(sessionId);
+  if (!existsSync(socketPath)) return undefined;
+
+  const adapter = new KeeperGoalAdapter({
+    sessionId,
+    socketPath,
+    logger: log,
+    ...(options.requestTimeoutMs !== undefined
+      ? { requestTimeoutMs: options.requestTimeoutMs }
+      : {}),
+  });
+
+  try {
+    await adapter.start();
+    const alive = await adapter.ping();
+    if (!alive) {
+      await adapter.close();
+      return undefined;
+    }
+    log.info('el proceso vivo responde: el objetivo se creara por ahi');
+    return adapter;
+  } catch (err) {
+    log.warn(`el proceso vivo no responde: ${(err as Error).message}`);
+    await adapter.close().catch(() => {});
+    return undefined;
+  }
 }
 
 /**

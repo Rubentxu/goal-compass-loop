@@ -31,6 +31,21 @@ export interface GoalPort {
   close(): Promise<void>;
 }
 
+/**
+ * Adaptador de objetivos: el puerto de arriba y ademas el arranque.
+ *
+ * El supervisor solo necesita saber leer y crear objetivos; como se llega al
+ * host es cosa del adaptador. Un adaptador puede hablar con el host en frio,
+ * con una conexion que ya esta viva o con lo que haga falta: el supervisor no
+ * cambia.
+ */
+export interface GoalAdapter extends GoalPort {
+  /** Prepara el adaptador para trabajar: conectar y dejar la sesion lista. */
+  start(): Promise<void>;
+  /** Pregunta al agente de la sesion. */
+  ask(question: string): Promise<string>;
+}
+
 export interface CandidatePort {
   /** Candidatos conocidos para la mision, dados el Goal anterior. */
   discover(mission: Mission, previousGoal: GoalState | null): Promise<Candidate[]>;

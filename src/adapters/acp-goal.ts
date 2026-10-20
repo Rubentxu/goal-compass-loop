@@ -10,7 +10,7 @@
  * fingir que el trabajo se esta haciendo.
  */
 import { AcpTransport } from './acp-transport.js';
-import { IncompatibleHostError, type GoalPort, type Logger } from '../ports.js';
+import { IncompatibleHostError, type GoalAdapter, type Logger } from '../ports.js';
 import type { GoalState } from '../core/types.js';
 
 const EXTENSION_META = {
@@ -54,7 +54,7 @@ export interface AcpGoalOptions {
 }
 
 /** Cliente ACP de un solo host, dueno unico de la creacion de Goals. */
-export class AcpGoalAdapter implements GoalPort {
+export class AcpGoalAdapter implements GoalAdapter {
   private transport: AcpTransport | undefined;
   private activeSessionId: string | undefined;
   private readonly options: AcpGoalOptions;

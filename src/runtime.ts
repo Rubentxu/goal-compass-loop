@@ -21,7 +21,7 @@ import { SessionExploration } from './adapters/exploration.js';
 import { ChainLock, decideDriving } from './adapters/ownership.js';
 import { ProposalCandidatePort } from './adapters/proposals.js';
 import { emptyMetrics, normalizeJournal, type Driver, type Journal } from './core/types.js';
-import type { CandidatePort, Logger } from './ports.js';
+import type { CandidatePort, GoalAdapter, Logger } from './ports.js';
 import { Supervisor } from './supervisor.js';
 
 export interface MissionRuntimeOptions {
@@ -45,12 +45,12 @@ export interface MissionRuntimeOptions {
    * vida. Sirve para poder cerrar el host aunque la mision no llegue a
    * arrancarse.
    */
-  adapter?: AcpGoalAdapter;
+  adapter?: GoalAdapter;
 }
 
 export interface MissionRuntime {
   supervisor: Supervisor;
-  adapter: AcpGoalAdapter;
+  adapter: GoalAdapter;
   journal: FileJournal;
   /** Si este camino puede conducir la mision. */
   driving: boolean;
