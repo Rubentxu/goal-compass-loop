@@ -597,6 +597,12 @@ Dentro de la conversación, el agente dispone además de las seis herramientas
 estado de la misión, que la pause o que la declare si no existe: el modelo las
 invoca por su cuenta.
 
+Este repositorio usa esa vía sobre sí mismo. Su trabajo pendiente está en
+[`roadmap.md`](roadmap.md), con la evidencia de cada hueco y la condición
+observable que lo cierra; la declaración de la misión es local y no se
+versiona, para que quien clone el repositorio no herede una cadena que gasta
+tokens de otra persona.
+
 ### Con el supervisor en segundo plano
 
 Se escribe un fichero `mission.json` (fuera del repositorio que se va a

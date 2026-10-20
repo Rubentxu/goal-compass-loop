@@ -337,7 +337,7 @@ skill/goal-compass/   Skill instalable con el arbol de 13 nodos (markdown + cabe
 plugin/                Paquete del plugin de MCode (manifiesto, hook, MCP, icono)
 spikes/                arnés + escenarios de aceptación contra el host real
 test/                  pruebas permanentes y arnés compartido
-docs/                  CICLO.md · EVIDENCIA.md · adr/
+docs/                  CICLO.md · EVIDENCIA.md · roadmap.md · adr/
 spec/                  kit de especificación congelado en la v0.2, como contexto
 ```
 
@@ -345,6 +345,17 @@ La carpeta `spec/` es el **kit de especificación de la v0.2**, conservado como
 documento histórico: explica el encargo, los límites y las decisiones de
 entrada. No es el código que se ejecuta. El grafo de la skill que sí se
 instala vive en `skill/goal-compass/` y lo comprueba la suite permanente.
+
+[`docs/roadmap.md`](docs/roadmap.md) es el trabajo que falta, con la evidencia
+de que hace falta y la condición observable que lo da por terminado. Es
+además el backlog de la misión de este repositorio: cada entrada tiene su
+ancla, y la cadena encadena la siguiente sin que nadie la escriba a mano.
+
+La **declaración** de esa misión (`goal-compass.json`) no se versiona, igual
+que el directorio de trabajo: es configuración local de quien la usa. Si
+estuviera en el repositorio, quien lo clonara heredaría una cadena que gasta
+tokens de otra persona. El trabajo, en cambio, sí se comparte: está en el
+roadmap.
 
 El núcleo no importa nada de los adaptadores. `decide()` no lee ficheros, no
 llama a la red y no conoce el reloj: recibe un `Snapshot` y devuelve una
