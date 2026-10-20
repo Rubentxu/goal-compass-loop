@@ -22,6 +22,27 @@ export const NON_SUCCESS_GOAL_STATUSES: readonly GoalStatus[] = [
   'usage_limited',
 ];
 
+/**
+ * Estados en los que el objetivo se ha quedado sin margen para seguir.
+ *
+ * No son un veredicto sobre el trabajo: solo dicen que se agotó el espacio
+ * que se le había dado. Por eso se reintentan con más presupuesto en lugar de
+ * dejar la cadena esperando.
+ */
+export const BUDGET_EXHAUSTED_GOAL_STATUSES: readonly GoalStatus[] = [
+  'budget_limited',
+  'usage_limited',
+];
+
+/**
+ * Cuantos intentos se le dan a un trabajo antes de dejarlo para un humano.
+ *
+ * El presupuesto se dobla en cada intento, asi que la secuencia habitual es
+ * 120k, 240k y 480k tokens. A partir del cuarto intento, el trabajo se aparca:
+ * repetir sin limite gastaria tokens sin avanzar.
+ */
+export const MAX_BUDGET_ATTEMPTS = 3;
+
 /** Verificacion final del Goal, cuando el runtime la ha ejecutado. */
 export interface GoalVerification {
   backend?: string;
@@ -118,7 +139,24 @@ export interface TransitionIntent {
   candidateId: string;
   /** Clave estable del candidato: permite reconocerlo aunque el backlog cambie. */
   candidateKey: string;
+  /**
+   * El objetivo que pidio el trabajo, tal cual.
+   *
+   * Es lo que se lee y lo que se compara; lo que recibe el host es
+   * `hostObjective`, que lleva dentro la evidencia y el criterio de cierre.
+   */
   objective: string;
+  /**
+   * El objetivo tal y como se le da al host.
+   *
+   * Lleva dentro la evidencia y el criterio de cierre del candidato, porque
+   * el Goal se autoejecuta y su arranque solo lleva este texto.
+   */
+  hostObjective: string;
+  /** De donde sale el trabajo: los ficheros que lo piden. */
+  evidenceRefs: string[];
+  /** Como se sabra que esta hecho. */
+  doneWhen: string[];
   tokenBudget: number | undefined;
   createdAt: string;
   status: 'intent' | 'committed' | 'obsolete';
@@ -138,7 +176,51 @@ export interface GoalRecord {
   candidateId: string | undefined;
   /** Clave estable del candidato (`candidateKey`): deduplica por intencion, no por texto. */
   candidateKey: string | undefined;
+  /** De donde salio el trabajo: los ficheros que lo piden. */
+  evidenceRefs?: string[];
+  /** Como se sabe que esta hecho. */
+  doneWhen?: string[];
   receipt: string | undefined;
+}
+
+/**
+ * Un trabajo que se quedo sin presupuesto, con lo que le costo.
+ *
+ * Es el rastro de los reintentos: que trabajo se quedo corto, cuanto se le
+ * habia dado, cuanto gasto y en que intento estaba.
+ */
+export interface BudgetAttempt {
+  /** Clave estable del trabajo reintentado. */
+  candidateKey: string;
+  /** Identificador del trabajo reintentado. */
+  candidateId: string;
+  /** Objetivo que se quedo sin margen. */
+  goalId: string;
+  /** Numero de intento: el primero es el 1. */
+  attempt: number;
+  /** Presupuesto que se le concedio en este intento. */
+  tokenBudget: number;
+  /** Tokens gastados en este intento. */
+  tokensUsed: number;
+  /** Momento en que se constato el agotamiento. */
+  endedAt: number;
+}
+
+/**
+ * Medidas de la mision.
+ *
+ * El presupuesto informa, no manda: que se pase no detiene la cadena, pero
+ * queda a la vista para que se sepa cuanto ha costado el trabajo.
+ */
+export interface MissionMetrics {
+  /** Tokens gastados por los objetivos de la cadena. */
+  tokensUsed: number;
+  /** El presupuesto declarado de la mision se ha superado. */
+  budgetExceeded: boolean;
+  /** Cuantos intentos se han quedado sin presupuesto. */
+  budgetExhaustions: number;
+  /** Cuantos objetivos se han encadenado. */
+  goalsCreated: number;
 }
 
 /** Ultimo avance observado del Goal en curso, para detectar estancamiento. */
@@ -165,6 +247,10 @@ export interface Journal {
   explorationStreak: number;
   /** Momento de la ultima exploracion, para respetar el enfriamiento. */
   lastExplorationAt: number | undefined;
+  /** Intentos que se quedaron sin presupuesto, con su coste. */
+  budgetAttempts: BudgetAttempt[];
+  /** Medidas de la mision: cuanto lleva gastado y como va. */
+  metrics: MissionMetrics;
   updatedAt: string;
 }
 
@@ -200,6 +286,14 @@ export interface Snapshot {
   goalsCreated: number;
   /** Tokens gastados por la mision hasta ahora, sumando los Goals ya terminados. */
   tokensUsedTotal: number;
+  /** El objetivo en curso lo creo la cadena (y no el usuario). */
+  ownGoal: boolean;
+  /** El trabajo que representa el objetivo en curso, si se sabe. */
+  goalCandidate: Candidate | null;
+  /** Clave estable del trabajo que representa el objetivo en curso. */
+  goalCandidateKey: string | null;
+  /** Intentos que se quedaron sin presupuesto. */
+  budgetAttempts: BudgetAttempt[];
   /** Milisegundos desde el ultimo avance observado del Goal en curso. */
   goalProgressSince: number | null;
   /** Marca temporal para decisiones dependientes del tiempo. */
@@ -210,6 +304,8 @@ export interface Snapshot {
  * Decision del nucleo puro. El adaptador la ejecuta.
  *
  * - `create`  : hay que crear un Goal nuevo (el anterior esta `complete`).
+ * - `retry`   : el objetivo se quedo sin presupuesto; el mismo trabajo se
+ *               vuelve a encolar con el presupuesto doblado.
  * - `reconcile`: hay una intencion sin confirmar; hay que reconciliar con el host.
  * - `park`    : no hay trabajo util; la mision queda viva pero dormida.
  * - `wait`    : el Goal actual sigue vivo o el host impose un limite.
@@ -217,6 +313,15 @@ export interface Snapshot {
  */
 export type Decision =
   | { kind: 'create'; candidate: Candidate; reason: string }
+  | {
+      kind: 'retry';
+      candidate: Candidate;
+      /** Clave estable del trabajo: mantiene el rastro de los intentos. */
+      candidateKey: string;
+      /** Presupuesto con el que se reintenta. */
+      tokenBudget: number;
+      reason: string;
+    }
   | { kind: 'reconcile'; intent: TransitionIntent; reason: string }
   | { kind: 'park'; reason: string }
   | { kind: 'wait'; reason: string }
@@ -234,4 +339,53 @@ export function candidateKey(candidate: Candidate): string {
 /** Normaliza texto para comparar claves sin depender de mayusculas ni espacios. */
 export function normalize(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Medidas de una mision recien abierta. */
+export function emptyMetrics(): MissionMetrics {
+  return { tokensUsed: 0, budgetExceeded: false, budgetExhaustions: 0, goalsCreated: 0 };
+}
+
+/**
+ * Completa lo que le falte a un journal escrito por una version anterior.
+ *
+ * Los journals que ya estaban escritos no tienen intentos ni medidas: se
+ * completan al leerlos, para que el estado viejo siga siendo utilizable.
+ */
+export function normalizeJournal(journal: Journal): Journal {
+  const loose = journal as Journal & {
+    budgetAttempts?: BudgetAttempt[];
+    metrics?: MissionMetrics;
+  };
+  loose.budgetAttempts ??= [];
+  loose.metrics = { ...emptyMetrics(), ...(loose.metrics ?? {}) };
+  return journal;
+}
+
+/**
+ * El objetivo que se le da al host: el trabajo y, con el, de donde sale y
+ * como se demuestra.
+ *
+ * El Goal se autoejecuta: su arranque solo lleva este texto. Si la evidencia
+ * y el criterio de cierre se quedan en el candidato, quien trabaja el
+ * objetivo tiene que volver a buscarlos, y el criterio —que es lo que decide
+ * si el trabajo esta demostrado— no llega nunca a quien tiene que
+ * demostrarlo.
+ *
+ * El texto se mantiene compacto: el host puede imponer un tope de longitud
+ * al objetivo, y un trabajo que no se puede crear no avanza.
+ */
+export function composeObjective(candidate: Candidate): string {
+  const lines = [candidate.objective.trim()];
+
+  if (candidate.evidenceRefs.length > 0) {
+    lines.push('', `Evidencia: ${candidate.evidenceRefs.join(', ')}`);
+  }
+
+  if (candidate.doneWhen.length > 0) {
+    lines.push('Criterio de cierre:');
+    for (const item of candidate.doneWhen) lines.push(`- ${item}`);
+  }
+
+  return lines.join('\n');
 }

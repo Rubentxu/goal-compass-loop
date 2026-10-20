@@ -9,6 +9,9 @@
  * El guion lo elige el entorno:
  *   FAKE_ACP_FAIL=<metodo>   el metodo responde con error
  *   FAKE_ACP_GOAL=<estado>   estado del Goal que devuelve
+ *   FAKE_ACP_SEED_GOAL=<estado>  el host arranca con un Goal ya creado
+ *   FAKE_ACP_SEED_ID=<id>       identificador de ese Goal
+ *   FAKE_ACP_SEED_BUDGET=<n>    presupuesto de ese Goal
  */
 import { createInterface } from 'node:readline';
 
@@ -21,6 +24,9 @@ const GOAL_METHODS = [
 
 const failMethod = process.env.FAKE_ACP_FAIL ?? '';
 const goalStatus = process.env.FAKE_ACP_GOAL ?? 'complete';
+const seedStatus = process.env.FAKE_ACP_SEED_GOAL ?? '';
+const seedId = process.env.FAKE_ACP_SEED_ID ?? 'tg_fake_1';
+const seedBudget = Number(process.env.FAKE_ACP_SEED_BUDGET ?? 0);
 
 let counter = 0;
 const goals = new Map();
@@ -29,7 +35,36 @@ function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
-function goal(sessionId, objective) {
+/**
+ * Deja un objetivo ya creado en la sesion.
+ *
+ * Sirve para el caso en que la cadena se encuentra un objetivo que ya esta
+ * en la sesion: agotado, pausado o activo.
+ */
+function seedGoal(sessionId) {
+  if (!seedStatus) return;
+  const goal = {
+    goalId: seedId,
+    sessionId,
+    objective: 'objetivo anterior',
+    status: seedStatus,
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+    tokensUsed: seedBudget,
+    turnsUsed: 1,
+    timeUsedSeconds: 9,
+    tokenBudget: seedBudget,
+    statusReason: `${seedStatus}(token_budget_exhausted)`,
+    executionWait: null,
+    hasKickoffAttachments: false,
+  };
+  goals.set(sessionId, goal);
+  // El objetivo sembrado ocupa el primer identificador: los que se creen
+  // despues no pueden repetirlo.
+  counter = Math.max(counter, 1);
+}
+
+function goal(sessionId, objective, tokenBudget) {
   counter += 1;
   const goalId = `tg_fake_${counter}`;
   const goal = {
@@ -46,6 +81,7 @@ function goal(sessionId, objective) {
     executionWait: null,
     hasKickoffAttachments: false,
   };
+  if (tokenBudget !== undefined) goal.tokenBudget = tokenBudget;
   goals.set(sessionId, goal);
   return goal;
 }
@@ -93,6 +129,7 @@ input.on('line', (line) => {
       send({ jsonrpc: '2.0', id: 987654, method: 'session/request_permission', params: {} });
       return;
     case 'session/new':
+      seedGoal(params.sessionId);
       // Un mensaje grande viaja partido en varios trozos: el receptor tiene
       // que rearmarlo antes de interpretarlo.
       send({
@@ -103,6 +140,7 @@ input.on('line', (line) => {
       send({ jsonrpc: '2.0', id, result: { sessionId: 'mvs_fake' } });
       return;
     case 'session/load':
+      seedGoal(params.sessionId);
       send({ jsonrpc: '2.0', id, result: { modes: { currentModeId: 'default' } } });
       return;
     case 'mcode/session/goal/get': {
@@ -111,7 +149,7 @@ input.on('line', (line) => {
       return;
     }
     case 'mcode/session/goal/create': {
-      const created = goal(params.sessionId, params.objective);
+      const created = goal(params.sessionId, params.objective, params.tokenBudget);
       send({ jsonrpc: '2.0', id, result: { goal: created } });
       return;
     }

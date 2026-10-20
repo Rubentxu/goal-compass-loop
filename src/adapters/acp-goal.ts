@@ -24,6 +24,9 @@ const GOAL_METHODS = [
   'mcode/session/goal/clear',
 ] as const;
 
+/** Margen para preguntar al agente: puede ser trabajo de verdad. */
+const ASK_TIMEOUT_MS = 10 * 60_000;
+
 export interface GoalUpdateEvent {
   sessionId: string;
   goal: GoalState | null;
@@ -39,6 +42,8 @@ export interface AcpGoalOptions {
   workspace: string;
   /** Sesion a reanudar; si no se indica, se crea una nueva. */
   sessionId?: string | undefined;
+  /** Milisegundos que una peticion puede esperar antes de darse por perdida. */
+  requestTimeoutMs?: number;
   /** Callback de notificaciones de Goal. */
   onGoalUpdate?: (event: GoalUpdateEvent) => void;
   /** Callback de cualquier notificacion, para trazas. */
@@ -90,6 +95,9 @@ export class AcpGoalAdapter implements GoalPort {
       cwd: this.options.workspace,
       env: this.options.env,
       logger: this.options.logger,
+      ...(this.options.requestTimeoutMs !== undefined
+        ? { requestTimeoutMs: this.options.requestTimeoutMs }
+        : {}),
       onNotification: (method, params) => this.onNotification(method, params),
       onRequest: async (method, params) => this.onRequest(method, params),
     });
@@ -158,16 +166,23 @@ export class AcpGoalAdapter implements GoalPort {
    * Hace una pregunta al agente de la sesion y devuelve su respuesta en texto.
    * Solo se usa con la sesion quieta: si hay un Goal en marcha, sus mensajes
    * se mezclarian con la respuesta.
+   *
+   * Preguntar al agente es trabajo de verdad: puede tardar minutos. Por eso
+   * esta peticion lleva su propio margen, mas largo que el del resto.
    */
   async ask(question: string): Promise<string> {
     await this.ensureHost();
     this.capturedText = '';
     this.capturing = true;
     try {
-      await this.requireTransport().request('session/prompt', {
-        sessionId: this.sessionId(),
-        prompt: [{ type: 'text', text: question }],
-      });
+      await this.requireTransport().request(
+        'session/prompt',
+        {
+          sessionId: this.sessionId(),
+          prompt: [{ type: 'text', text: question }],
+        },
+        ASK_TIMEOUT_MS,
+      );
     } finally {
       this.capturing = false;
     }

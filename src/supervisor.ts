@@ -17,8 +17,11 @@
 import { randomUUID } from 'node:crypto';
 import { decide } from './core/decide.js';
 import {
+  BUDGET_EXHAUSTED_GOAL_STATUSES,
   candidateKey,
+  composeObjective,
   normalize,
+  normalizeJournal,
   type Candidate,
   type GoalRecord,
   type GoalState,
@@ -187,6 +190,8 @@ export class Supervisor {
     switch (decision.kind) {
       case 'create':
         return this.executeCreate(decision.candidate);
+      case 'retry':
+        return this.executeRetry(decision.candidate, decision.candidateKey, decision.tokenBudget);
       case 'reconcile':
         await this.executeReconcile(decision.intent);
         return undefined;
@@ -212,11 +217,14 @@ export class Supervisor {
     let goal = await this.goalPort.read(sessionId);
     goal = await this.applyControl(journal, goal);
     await this.syncCompletedGoal(journal, goal);
+    await this.recordBudgetExhaustion(journal, goal);
     await this.trackProgress(journal, goal);
 
     const discovered = await this.candidatePort.discover(journal.mission, goal);
     const candidates = [...discovered, ...journal.explored];
-    return decide(this.buildSnapshot(journal, goal, candidates));
+    const snapshot = this.buildSnapshot(journal, goal, candidates);
+    await this.updateMetrics(journal, goal);
+    return decide(snapshot);
   }
 
   /**
@@ -254,11 +262,10 @@ export class Supervisor {
     // nativo del usuario en su sesion no es gasto de esta mision.
     const recorded = new Set(journal.goals.map((record) => record.goalId));
     const own = goal ? this.isOwnGoal(journal, goal.goalId) : false;
-    const tokensUsedTotal =
-      journal.goals.reduce((total, record) => total + record.tokensUsed, 0) +
-      (goal && own && !recorded.has(goal.goalId) ? goal.tokensUsed : 0);
+    const tokensUsedTotal = this.tokensUsedTotal(journal, goal, recorded, own);
 
     const progress = journal.progress;
+    const work = this.goalWork(journal, goal, candidates);
     return {
       mission: journal.mission,
       goal,
@@ -273,9 +280,34 @@ export class Supervisor {
         .filter((key): key is string => typeof key === 'string'),
       goalsCreated: journal.intents.filter((intent) => intent.status === 'committed').length,
       tokensUsedTotal,
+      ownGoal: own,
+      goalCandidate: work.candidate,
+      goalCandidateKey: work.key,
+      budgetAttempts: journal.budgetAttempts,
       goalProgressSince: progress && progress.goalId === goal?.goalId ? progress.since : null,
       now: this.clock.now(),
     };
+  }
+
+  /**
+   * El trabajo que representa el objetivo en curso.
+   *
+   * Se busca el candidato vivo que encaja con la intencion; si ya no esta en
+   * la cola, se reconstruye con lo que quedo guardado, porque el reintento
+   * tiene que seguir siendo el mismo trabajo aunque la cola haya cambiado.
+   */
+  private goalWork(
+    journal: Journal,
+    goal: GoalState | null,
+    candidates: Candidate[],
+  ): { candidate: Candidate | null; key: string | null } {
+    if (!goal) return { candidate: null, key: null };
+
+    const intent = journal.intents.find((entry) => entry.goalId === goal.goalId);
+    if (!intent) return { candidate: null, key: null };
+
+    const live = candidates.find((candidate) => candidate.candidateId === intent.candidateId);
+    return { candidate: live ?? candidateFromIntent(intent), key: intent.candidateKey };
   }
 
   /**
@@ -329,7 +361,7 @@ export class Supervisor {
 
     const record: GoalRecord = {
       goalId: goal.goalId,
-      objective: goal.objective,
+      objective: intent.objective,
       status: goal.status,
       statusReason: goal.statusReason,
       tokensUsed: goal.tokensUsed,
@@ -338,6 +370,8 @@ export class Supervisor {
       endedAt: goal.updatedAt,
       candidateId: intent.candidateId,
       candidateKey: intent.candidateKey,
+      evidenceRefs: intent.evidenceRefs ?? [],
+      doneWhen: intent.doneWhen ?? [],
       receipt: goal.lastVerification?.reason?.slice(0, 200),
     };
     journal.goals.push(record);
@@ -351,6 +385,104 @@ export class Supervisor {
   /** Si el objetivo lo creo la cadena, segun las intenciones persistidas. */
   private isOwnGoal(journal: Journal, goalId: string): boolean {
     return journal.intents.some((intent) => intent.goalId === goalId);
+  }
+
+  /**
+   * Anota el intento que se quedo sin presupuesto.
+   *
+   * Solo cuenta el objetivo que creo la cadena: el objetivo nativo del usuario
+   * es suyo, y su gasto no es de esta mision. Cada objetivo se anota una vez,
+   * aunque se lo siga viendo en estado agotado.
+   */
+  private async recordBudgetExhaustion(journal: Journal, goal: GoalState | null): Promise<void> {
+    if (!goal || !BUDGET_EXHAUSTED_GOAL_STATUSES.includes(goal.status)) return;
+    if (!this.isOwnGoal(journal, goal.goalId)) return;
+    if (journal.budgetAttempts.some((attempt) => attempt.goalId === goal.goalId)) return;
+
+    const intent = journal.intents.find((entry) => entry.goalId === goal.goalId);
+    const key = intent?.candidateKey ?? goal.goalId;
+    const previous = journal.budgetAttempts.filter((attempt) => attempt.candidateKey === key);
+
+    journal.budgetAttempts.push({
+      candidateKey: key,
+      candidateId: intent?.candidateId ?? key,
+      goalId: goal.goalId,
+      attempt: previous.length + 1,
+      tokenBudget: goal.tokenBudget ?? intent?.tokenBudget ?? journal.mission.defaultTokenBudget,
+      tokensUsed: goal.tokensUsed,
+      endedAt: goal.updatedAt,
+    });
+    await this.saveJournal(journal);
+    this.logger.warn(
+      `objetivo ${goal.goalId} sin presupuesto (${goal.tokensUsed} token(s)): ` +
+        'el mismo trabajo vuelve a la cola con mas margen',
+    );
+  }
+
+  /**
+   * Cuanto ha gastado la mision.
+   *
+   * Cuentan los objetivos terminados y los que se quedaron sin presupuesto:
+   * esos tokens tambien se gastaron. Un Goal ya terminado y registrado no se
+   * vuelve a sumar: contarlo dos veces consumiria el presupuesto de la mision
+   * al doble de velocidad. Y el Goal en curso solo cuenta si lo creo la
+   * cadena: el objetivo nativo del usuario en su sesion no es gasto de esta
+   * mision.
+   */
+  private tokensUsedTotal(
+    journal: Journal,
+    goal: GoalState | null,
+    recorded?: Set<string>,
+    own?: boolean,
+  ): number {
+    const counted = recorded ?? new Set(journal.goals.map((record) => record.goalId));
+    const attempted = new Set(journal.budgetAttempts.map((attempt) => attempt.goalId));
+    const isOwn = own ?? (goal ? this.isOwnGoal(journal, goal.goalId) : false);
+
+    const total =
+      journal.goals.reduce((sum, record) => sum + record.tokensUsed, 0) +
+      journal.budgetAttempts.reduce((sum, attempt) => sum + attempt.tokensUsed, 0);
+
+    if (goal && isOwn && !counted.has(goal.goalId) && !attempted.has(goal.goalId)) {
+      return total + goal.tokensUsed;
+    }
+    return total;
+  }
+
+  /**
+   * Actualiza las medidas de la mision.
+   *
+   * El presupuesto total no detiene la cadena: se anota cuando se supera, para
+   * que el gasto quede a la vista, y se avisa una sola vez al cruzarlo.
+   */
+  private async updateMetrics(journal: Journal, goal: GoalState | null): Promise<void> {
+    const metrics = journal.metrics;
+    const wasExceeded = metrics.budgetExceeded;
+    const tokensUsed = this.tokensUsedTotal(journal, goal);
+    const goalsCreated = journal.intents.filter((intent) => intent.status === 'committed').length;
+    const budget = journal.mission.totalTokenBudget;
+    const exceeded = budget !== null && tokensUsed >= budget;
+
+    const changed =
+      metrics.tokensUsed !== tokensUsed ||
+      metrics.budgetExceeded !== exceeded ||
+      metrics.budgetExhaustions !== journal.budgetAttempts.length ||
+      metrics.goalsCreated !== goalsCreated;
+
+    metrics.tokensUsed = tokensUsed;
+    metrics.budgetExceeded = exceeded;
+    metrics.budgetExhaustions = journal.budgetAttempts.length;
+    metrics.goalsCreated = goalsCreated;
+
+    if (!changed) return;
+    await this.saveJournal(journal);
+
+    if (exceeded && !wasExceeded) {
+      this.logger.warn(
+        `el presupuesto de la mision (${budget}) se ha superado (${tokensUsed} token(s)): ` +
+          'la cadena sigue, el presupuesto es una medida',
+      );
+    }
   }
 
   /** Descarta los candidatos explorados que ya se han resuelto. */
@@ -386,9 +518,52 @@ export class Supervisor {
       release();
     }
   }
+  /**
+   * Reintenta el trabajo que se quedo sin presupuesto.
+   *
+   * El host guarda un unico objetivo por sesion, y un objetivo agotado impide
+   * crear el siguiente: primero se libera el hueco y luego se encadena el
+   * mismo trabajo con el presupuesto doblado. Es el mismo trabajo y con la
+   * misma evidencia: solo cambia cuanto margen tiene.
+   */
+  private async executeRetry(
+    candidate: Candidate,
+    candidateKey: string,
+    tokenBudget: number,
+  ): Promise<GoalState | undefined> {
+    const release = this.chainLock.acquire(this.clock.now());
+    if (!release) {
+      this.logger.info('otra via esta encadenando trabajo: se espera al siguiente ciclo');
+      return undefined;
+    }
+
+    try {
+      const sessionId = this.goalPort.sessionId();
+      const cleared = await this.goalPort.clear(sessionId);
+      if (!cleared) {
+        const current = await this.goalPort.read(sessionId);
+        if (current) {
+          this.logger.warn(
+            `no se pudo liberar el objetivo ${current.goalId} (${current.status}): el reintento espera`,
+          );
+          return undefined;
+        }
+      }
+
+      this.logger.info(
+        `objetivo liberado: se reintenta "${candidate.objective}" con ${tokenBudget} token(s)`,
+      );
+      return await this.createGoal(candidate, { tokenBudget, candidateKey });
+    } finally {
+      release();
+    }
+  }
 
   /** Crea el objetivo: primero se comprueba que toca, luego se encadena. */
-  private async createGoal(candidate: Candidate): Promise<GoalState | undefined> {
+  private async createGoal(
+    candidate: Candidate,
+    options: { tokenBudget?: number; candidateKey?: string } = {},
+  ): Promise<GoalState | undefined> {
     const journal = await this.loadJournal();
     const sessionId = this.goalPort.sessionId();
 
@@ -401,12 +576,19 @@ export class Supervisor {
       return undefined;
     }
 
-    const tokenBudget = candidate.tokenBudget ?? journal.mission.defaultTokenBudget;
+    const tokenBudget =
+      options.tokenBudget ?? candidate.tokenBudget ?? journal.mission.defaultTokenBudget;
+    // Al host se le da el objetivo con la evidencia y el criterio de cierre
+    // dentro: el Goal se autoejecuta y su arranque solo lleva ese texto.
+    const hostObjective = composeObjective(candidate);
     const intent: TransitionIntent = {
       intentId: randomUUID(),
       candidateId: candidate.candidateId,
-      candidateKey: candidateKey(candidate),
+      candidateKey: options.candidateKey ?? candidateKey(candidate),
       objective: candidate.objective,
+      hostObjective,
+      evidenceRefs: [...candidate.evidenceRefs],
+      doneWhen: [...candidate.doneWhen],
       tokenBudget,
       createdAt: new Date(this.clock.now()).toISOString(),
       status: 'intent',
@@ -423,7 +605,7 @@ export class Supervisor {
 
     let created: GoalState;
     try {
-      created = await this.goalPort.create(sessionId, candidate.objective, tokenBudget);
+      created = await this.goalPort.create(sessionId, hostObjective, tokenBudget);
     } catch (err) {
       // La intencion sigue sin confirmar: se reconciliara en el proximo ciclo.
       this.logger.error(`la creacion del goal fallo: ${(err as Error).message}`);
@@ -435,9 +617,12 @@ export class Supervisor {
 
     this.commitIntent(journal, intent.intentId, confirmed.goalId);
     await this.saveJournal(journal);
+    // El objetivo nuevo ya cuenta: las medidas se refrescan para que no
+    // empieces a ir un paso por detras.
+    await this.updateMetrics(journal, confirmed);
 
     this.logger.info(
-      `goal creado y confirmado: ${confirmed.goalId} (${confirmed.status}) - ${candidate.objective.slice(0, 80)}`,
+      `goal creado y confirmado: ${confirmed.goalId} (${confirmed.status}) - ${hostObjective.slice(0, 80)}`,
     );
     return confirmed;
   }
@@ -594,7 +779,9 @@ export class Supervisor {
         'journal vacio: inicializa la mision antes de arrancar el supervisor (goal-compass init)',
       );
     }
-    return existing;
+    // Un journal escrito antes de que existieran los intentos y las medidas
+    // se completa al leerlo: lo viejo sigue siendo utilizable.
+    return normalizeJournal(existing);
   }
 
   private async saveJournal(journal: Journal): Promise<void> {
@@ -605,6 +792,30 @@ export class Supervisor {
 
 /** Compara el Goal del host con la intencion persistida. */
 function matchesIntent(goal: GoalState, intent: TransitionIntent): boolean {
-  if (goal.objective === intent.objective) return true;
-  return normalize(goal.objective) === normalize(intent.objective);
+  // El host recibio el objetivo con la evidencia dentro. Las intenciones
+  // antiguas solo guardaban el texto del trabajo: se comparan con el.
+  const expected = intent.hostObjective ?? intent.objective;
+  if (goal.objective === expected) return true;
+  return normalize(goal.objective) === normalize(expected);
+}
+
+/**
+ * Reconstruye el trabajo de una intencion cuando ya no esta en la cola.
+ *
+ * Se conservan el objetivo, la evidencia y el criterio de cierre: el
+ * reintento tiene que ser el mismo trabajo, no uno parecido.
+ */
+function candidateFromIntent(intent: TransitionIntent): Candidate {
+  return {
+    candidateId: intent.candidateId,
+    objective: intent.objective,
+    whyNow: 'el objetivo se quedo sin presupuesto y se reintenta con mas margen',
+    evidenceRefs: [...(intent.evidenceRefs ?? [])],
+    doneWhen: [...(intent.doneWhen ?? [])],
+    risk: 'medium',
+    priority: 0,
+    prerequisites: [],
+    source: 'roadmap',
+    ...(intent.tokenBudget !== undefined ? { tokenBudget: intent.tokenBudget } : {}),
+  };
 }

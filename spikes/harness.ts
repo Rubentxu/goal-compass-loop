@@ -213,6 +213,8 @@ export async function runScenario(
     explored: [],
     explorationStreak: 0,
     lastExplorationAt: undefined,
+    budgetAttempts: [],
+    metrics: { tokensUsed: 0, budgetExceeded: false, budgetExhaustions: 0, goalsCreated: 0 },
     updatedAt: new Date().toISOString(),
   });
 

@@ -171,6 +171,8 @@ describe('el estado que pertenece a otro proyecto', () => {
         explored: [],
         explorationStreak: 0,
         lastExplorationAt: undefined,
+        budgetAttempts: [],
+        metrics: { tokensUsed: 0, budgetExceeded: false, budgetExhaustions: 0, goalsCreated: 0 },
         updatedAt: new Date().toISOString(),
       };
       await journal.saveAtomically(existente);

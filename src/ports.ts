@@ -17,6 +17,14 @@ export interface GoalPort {
   pause(sessionId: string): Promise<GoalState | null>;
   /** Reanuda un Goal pausado. */
   resume(sessionId: string): Promise<GoalState | null>;
+  /**
+   * Libera el objetivo de la sesion.
+   *
+   * El host guarda un unico objetivo por sesion, asi que un objetivo que no
+   * ha terminado impide crear el siguiente. Vaciarlo es lo que permite
+   * reencolar el mismo trabajo con mas presupuesto.
+   */
+  clear(sessionId: string): Promise<boolean>;
   /** SessionId de la sesion gestionada por este supervisor. */
   sessionId(): string;
   /** Cierra host y recursos. */

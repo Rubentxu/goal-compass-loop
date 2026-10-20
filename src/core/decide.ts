@@ -5,10 +5,13 @@
  * Toda la politica de autoridad vive aqui; los adaptadores solo ejecutan.
  */
 import {
+  BUDGET_EXHAUSTED_GOAL_STATUSES,
+  MAX_BUDGET_ATTEMPTS,
   NON_SUCCESS_GOAL_STATUSES,
   candidateKey,
   type Candidate,
   type Decision,
+  type GoalState,
   type Snapshot,
 } from './types.js';
 
@@ -53,10 +56,15 @@ const RISK_ORDER: Record<Candidate['risk'], number> = { low: 0, medium: 1, high:
  * Reglas, en orden de precedencia:
  *  1. La autoridad del usuario gana siempre (stopped/paused_by_user).
  *  2. Una intencion sin confirmar se reconcilia ANTES de decidir nada nuevo.
- *  3. Los limites del host (paused/blocked/budget_limited/usage_limited) nunca
- *     se esquivan creando otro Goal.
- *  4. Con un Goal `active` no se crea otro.
- *  5. Solo `complete` (o la ausencia de Goal) habilita crear el siguiente.
+ *  3. Un objetivo sin presupuesto es trabajo a medias: se reintenta con el
+ *     presupuesto doblado, hasta tres intentos. No es un veredicto sobre el
+ *     trabajo, asi que no se esquiva esperando.
+ *  4. Los limites del host que no son de presupuesto (paused/blocked) se
+ *     esperan: son una decision de alguien.
+ *  5. Con un Goal `active` no se crea otro.
+ *  6. Solo `complete` (o la ausencia de Goal) habilita crear el siguiente.
+ *  7. El presupuesto total de la mision es una medida, no un muro: se informa
+ *     en las metricas y la cadena sigue.
  */
 export function decide(snapshot: Snapshot): Decision {
   const { mission, goal } = snapshot;
@@ -76,6 +84,12 @@ export function decide(snapshot: Snapshot): Decision {
     };
   }
 
+  // Antes que el estancamiento: un objetivo sin presupuesto no avanza por si
+  // mismo, y esperar a que expire el plazo seria dejar el trabajo a medias.
+  if (goal && BUDGET_EXHAUSTED_GOAL_STATUSES.includes(goal.status)) {
+    return decideRetry(snapshot, goal);
+  }
+
   if (goal && goal.status !== 'complete' && isStalled(snapshot)) {
     return {
       kind: 'park',
@@ -89,7 +103,7 @@ export function decide(snapshot: Snapshot): Decision {
     const reason = goal.statusReason ? ` (${goal.statusReason})` : '';
     return {
       kind: 'wait',
-      reason: `goal en estado ${goal.status}${reason}: no se crea otro Goal para esquivar el limite`,
+      reason: `goal en estado ${goal.status}${reason}: se espera, es una decision de alguien y la cadena no la esquiva`,
     };
   }
 
@@ -101,15 +115,6 @@ export function decide(snapshot: Snapshot): Decision {
     return {
       kind: 'park',
       reason: `limite administrativo de ${mission.maxGoals} Goals alcanzado; la mision sigue viva`,
-    };
-  }
-
-  if (mission.totalTokenBudget !== null && snapshot.tokensUsedTotal >= mission.totalTokenBudget) {
-    return {
-      kind: 'park',
-      reason:
-        `presupuesto de la mision agotado ` +
-        `(${snapshot.tokensUsedTotal} de ${mission.totalTokenBudget} tokens); la mision sigue viva`,
     };
   }
 
@@ -138,6 +143,75 @@ export function decide(snapshot: Snapshot): Decision {
     candidate: best,
     reason: best.whyNow || `candidato elegido por prioridad (${best.priority})`,
   };
+}
+
+/**
+ * Que hacer con un objetivo que se quedo sin margen.
+ *
+ * Agotar el presupuesto no dice nada del trabajo: solo dice que se le
+ * acabo el espacio. Por eso el trabajo vuelve a la cola con el doble de
+ * presupuesto, hasta un maximo de intentos. Cuando se agotan los intentos, la
+ * mision sigue viva y espera a que alguien lo revise.
+ */
+function decideRetry(snapshot: Snapshot, goal: GoalState): Decision {
+  if (!snapshot.ownGoal) {
+    return {
+      kind: 'wait',
+      reason: `el objetivo ${goal.goalId} se quedo sin presupuesto y no es de la cadena: no se toca`,
+    };
+  }
+
+  const candidate = snapshot.goalCandidate;
+  if (!candidate) {
+    return {
+      kind: 'park',
+      reason:
+        `el objetivo ${goal.goalId} se quedo sin presupuesto y no se sabe que trabajo representa; ` +
+        'la mision sigue viva',
+    };
+  }
+
+  const key = snapshot.goalCandidateKey ?? candidateKey(candidate);
+  const attempts = snapshot.budgetAttempts.filter((attempt) => attempt.candidateKey === key);
+
+  if (attempts.length >= MAX_BUDGET_ATTEMPTS) {
+    return {
+      kind: 'park',
+      reason:
+        `el trabajo "${candidate.objective}" se quedo sin presupuesto ${attempts.length} veces ` +
+        `(${attempts.map((attempt) => attempt.tokenBudget).join(', ')} token(s)); ` +
+        'la mision sigue viva y espera a que alguien lo revise',
+    };
+  }
+
+  const last = attempts[attempts.length - 1];
+  const granted =
+    last?.tokenBudget ??
+    goal.tokenBudget ??
+    candidate.tokenBudget ??
+    snapshot.mission.defaultTokenBudget;
+
+  return {
+    kind: 'retry',
+    candidate,
+    candidateKey: key,
+    tokenBudget: granted * 2,
+    reason:
+      `el objetivo ${goal.goalId} se quedo sin presupuesto (${goal.tokensUsed} de ${granted} token(s)); ` +
+      `el mismo trabajo se reintenta con ${granted * 2}`,
+  };
+}
+
+/**
+ * Si el presupuesto declarado de la mision se ha superado.
+ *
+ * No detiene la cadena: el presupuesto mide lo que ha costado el trabajo, y
+ * medir no es impedir. Se informa para que el gasto quede a la vista.
+ */
+export function missionBudgetExceeded(snapshot: Snapshot): boolean {
+  const budget = snapshot.mission.totalTokenBudget;
+  if (budget === null) return false;
+  return snapshot.tokensUsedTotal >= budget;
 }
 
 /**

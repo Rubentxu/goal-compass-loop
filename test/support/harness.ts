@@ -17,6 +17,7 @@ import type {
   MissionStatus,
   Snapshot,
 } from '../../src/core/types.js';
+import { emptyMetrics } from '../../src/core/types.js';
 import type { GoalPort, JournalPort } from '../../src/ports.js';
 
 const NOW = 1_700_000_000_000;
@@ -87,6 +88,10 @@ export function aSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     completedCandidateKeys: [],
     goalsCreated: 0,
     tokensUsedTotal: 0,
+    ownGoal: false,
+    goalCandidate: null,
+    goalCandidateKey: null,
+    budgetAttempts: [],
     goalProgressSince: null,
     now: NOW,
     ...overrides,
@@ -106,6 +111,8 @@ export function anEmptyJournal(mission: Mission = aMission()): Journal {
     explored: [],
     explorationStreak: 0,
     lastExplorationAt: undefined,
+    budgetAttempts: [],
+    metrics: emptyMetrics(),
     updatedAt: new Date(NOW).toISOString(),
   };
 }
@@ -119,6 +126,9 @@ export class MemoryGoalHost implements GoalPort {
   createCount = 0;
   pauseCount = 0;
   resumeCount = 0;
+  clearCount = 0;
+  /** Presupuestos con los que se han creado los objetivos, en orden. */
+  grantedBudgets: number[] = [];
   private counter = 0;
 
   async read(): Promise<GoalState | null> {
@@ -132,6 +142,7 @@ export class MemoryGoalHost implements GoalPort {
   ): Promise<GoalState> {
     this.createCount += 1;
     this.counter += 1;
+    this.grantedBudgets.push(tokenBudget ?? 0);
     this.current = aGoal({
       goalId: `tg_new_${this.counter}`,
       objective,
@@ -158,6 +169,19 @@ export class MemoryGoalHost implements GoalPort {
     return this.current;
   }
 
+  /**
+   * Libera el objetivo de la sesion.
+   *
+   * El host real guarda un unico objetivo por sesion: mientras haya uno, no
+   * deja crear el siguiente.
+   */
+  async clear(): Promise<boolean> {
+    this.clearCount += 1;
+    const had = this.current !== null;
+    this.current = null;
+    return had;
+  }
+
   sessionId(): string {
     return 's1';
   }
@@ -175,6 +199,19 @@ export class MemoryGoalHost implements GoalPort {
     });
     this.current = completed;
     return completed;
+  }
+
+  /** Deja el objetivo actual sin presupuesto, como hace el host al agotarlo. */
+  exhaust(tokensUsed: number): GoalState {
+    const exhausted = aGoal({
+      ...(this.current ?? {}),
+      status: 'budget_limited',
+      statusReason: 'budget_limited(token_budget_exhausted)',
+      tokensUsed,
+      updatedAt: NOW,
+    });
+    this.current = exhausted;
+    return exhausted;
   }
 }
 

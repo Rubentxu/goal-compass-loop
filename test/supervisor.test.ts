@@ -76,6 +76,9 @@ function pendingIntent(journal: MemoryJournal, overrides: Partial<Journal['inten
     candidateId: 'c1',
     candidateKey: 'clave-estable',
     objective: 'Corregir el fallo de parseo',
+    hostObjective: 'Corregir el fallo de parseo',
+    evidenceRefs: [],
+    doneWhen: [],
     tokenBudget: 100_000,
     createdAt: new Date(NOW).toISOString(),
     status: 'intent',
@@ -90,7 +93,7 @@ describe('supervisor · transicion durable', () => {
     await supervisor.run();
 
     expect(host.createCount).toBe(1);
-    expect(host.current?.objective).toBe('Corregir el fallo de parseo');
+    expect(host.current?.objective).toContain('Corregir el fallo de parseo');
     expect(journal.state.intents[0]?.status).toBe('committed');
   });
 
@@ -450,5 +453,46 @@ describe('supervisor · el gasto que no es de la mision', () => {
     // El objetivo recien creado es de la cadena, asi que su gasto cuenta.
     expect(journal.state.intents[0]?.goalId).toBe(host.current?.goalId);
     expect(journal.state.intents[0]?.status).toBe('committed');
+  });
+});
+
+describe('supervisor · la evidencia y el criterio viajan con el objetivo', () => {
+  it('el objetivo que recibe el host lleva la evidencia y el criterio de cierre', async () => {
+    const { supervisor, host, journal } = build({ candidates: [aCandidate()] });
+
+    await supervisor.run();
+
+    const objetivo = host.current?.objective ?? '';
+    expect(objetivo).toContain('Corregir el fallo de parseo');
+    expect(objetivo).toContain('Evidencia: docs/triage.md#parseo');
+    expect(objetivo).toContain('Criterio de cierre:');
+    expect(objetivo).toContain('La prueba que fallaba pasa');
+  });
+
+  it('la intencion persistida guarda la evidencia y el criterio', async () => {
+    const { supervisor, journal } = build({ candidates: [aCandidate()] });
+
+    await supervisor.run();
+
+    const intent = journal.state.intents[0];
+    expect(intent?.evidenceRefs).toEqual(['docs/triage.md#parseo']);
+    expect(intent?.doneWhen).toEqual(['La prueba que fallaba pasa']);
+    // El texto del trabajo se guarda aparte del que recibe el host.
+    expect(intent?.objective).toBe('Corregir el fallo de parseo');
+    expect(intent?.hostObjective).toContain('Evidencia: docs/triage.md#parseo');
+  });
+
+  it('el historial del objetivo terminado guarda la evidencia y el criterio', async () => {
+    const host = new MemoryGoalHost();
+    const journal = new MemoryJournal(anEmptyJournal());
+    const { supervisor } = build({ host, journal, candidates: [aCandidate()] });
+
+    await supervisor.run();
+    host.complete();
+    await supervisor.run();
+
+    const record = journal.state.goals[0];
+    expect(record?.evidenceRefs).toEqual(['docs/triage.md#parseo']);
+    expect(record?.doneWhen).toEqual(['La prueba que fallaba pasa']);
   });
 });

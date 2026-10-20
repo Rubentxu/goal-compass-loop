@@ -10,6 +10,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 afterEach(cleanupTempDirs);
 import { cleanupTempDirs, tempDir } from './support/temp.js';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 
 
 import { join } from 'node:path';
@@ -17,12 +18,65 @@ import { fileURLToPath } from 'node:url';
 import { parseHookEvent, runAutoContinue } from '../src/plugin/auto-continue.js';
 import { findMissionFile, findMissionFileUpwards } from '../src/plugin/mission-locator.js';
 import { installPlugin, PLUGIN_NAME } from '../src/plugin/install.js';
+import type { Journal } from '../src/core/types.js';
 import type { Logger } from '../src/ports.js';
 
 const HOST_SCRIPT = fileURLToPath(new URL('./support/fake-acp-host.mjs', import.meta.url));
 const HOST = { command: process.execPath, args: [HOST_SCRIPT] };
 
 const quietLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
+
+/**
+ * Ejecuta el hook como el host lo hace: un proceso aparte que lee un evento
+ * por la entrada estandar y contesta por la salida estandar.
+ *
+ * Es la unica forma de comprobar lo que de verdad importa del hook: que
+ * termina. Un hook que no termina hace que el host espere a su propio limite
+ * y tire la continuacion preparada.
+ */
+function runHookProcess(
+  workspace: string,
+  binDir: string,
+  env: Record<string, string>,
+): Promise<{ code: number | null; elapsed: number; out: string }> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const child = spawn(
+      join(process.cwd(), 'node_modules', '.bin', 'tsx'),
+      ['src/plugin/auto-continue.ts'],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH ?? ''}`,
+          ...env,
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
+
+    let out = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      out += chunk.toString();
+    });
+    child.stderr.on('data', () => {});
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('el hook no termino'));
+    }, 30_000);
+
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      resolve({ code, elapsed: Date.now() - started, out });
+    });
+
+    child.stdin.write(
+      `${JSON.stringify({ hook_event_name: 'Stop', session_id: 'mvs_fake', cwd: workspace })}\n`,
+    );
+    child.stdin.end();
+  });
+}
 
 
 function writeMission(workspace: string, allowRemoteWrite = false, driver?: string): void {
@@ -123,6 +177,57 @@ describe('hook de continuacion', () => {
     expect(decision.reason).toContain('deja el trabajo siguiente');
   });
 
+  it('la continuacion nombra la evidencia y el criterio de cierre del objetivo', async () => {    const salida = await runAutoContinue(
+      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
+      { host: HOST, logger: quietLogger },
+    );
+    const decision = JSON.parse(salida) as { reason: string };
+    expect(decision.reason).toContain('Evidencia: NOTAS.md');
+    expect(decision.reason).toContain('Criterio de cierre:');
+    expect(decision.reason).toContain('Las notas estan revisadas');
+  });
+
+  it('el objetivo sin presupuesto se reintenta con mas margen en vez de quedarse esperando', async () => {
+    // El primer turno encadena el objetivo.
+    const primera = await runAutoContinue(
+      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
+      { host: HOST, logger: quietLogger },
+    );
+    expect(JSON.parse(primera).reason).toContain('Objetivo:');
+
+    // El host devuelve ese mismo objetivo, ya sin presupuesto.
+    process.env.FAKE_ACP_SEED_GOAL = 'budget_limited';
+    process.env.FAKE_ACP_SEED_ID = 'tg_fake_1';
+    process.env.FAKE_ACP_SEED_BUDGET = '60000';
+    let salida: string;
+    try {
+      salida = await runAutoContinue(
+        JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
+        { host: HOST, logger: quietLogger },
+      );
+    } finally {
+      delete process.env.FAKE_ACP_SEED_GOAL;
+      delete process.env.FAKE_ACP_SEED_ID;
+      delete process.env.FAKE_ACP_SEED_BUDGET;
+    }
+
+    const decision = JSON.parse(salida) as { reason: string };
+    expect(decision.reason).toContain('se quedo sin presupuesto');
+    expect(decision.reason).toContain('reintentado con mas margen');
+
+    // El trabajo vuelve a la cola con el doble de presupuesto, y el intento
+    // agotado queda anotado con su coste.
+    const state = JSON.parse(
+      readFileSync(join(stateHome, 'goal-compass', 'prueba-hook', 'journal.json'), 'utf8'),
+    ) as Journal;
+    expect(state.budgetAttempts).toHaveLength(1);
+    expect(state.budgetAttempts[0]?.tokenBudget).toBe(60_000);
+    const committed = state.intents.filter((intent) => intent.status === 'committed');
+    expect(committed).toHaveLength(2);
+    expect(committed[1]?.tokenBudget).toBe(120_000);
+    expect(committed[1]?.candidateKey).toBe(committed[0]?.candidateKey);
+  });
+
   it('una mision que autoriza publicar lo dice sin dar permiso por su cuenta', async () => {
     const otro = tempDir('gcl-hook-publica-');
     writeMission(otro, true);
@@ -188,6 +293,58 @@ describe('hook de continuacion', () => {
       { host: HOST, deadlineMs: 1, logger: quietLogger },
     );
     expect(salida).toBe('');
+  });
+});
+
+describe('el hook como proceso', () => {
+  let workspace: string;
+  let stateHome: string;
+  let previousStateHome: string | undefined;
+  let binDir: string;
+
+  beforeEach(() => {
+    workspace = tempDir('gcl-proceso-');
+    stateHome = tempDir('gcl-proceso-estado-');
+    binDir = tempDir('gcl-proceso-bin-');
+    previousStateHome = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = stateHome;
+    writeMission(workspace);
+
+    // El hook arranca el host por su nombre: aqui se le da el host de
+    // mentira, sin tocar el codigo de produccion.
+    writeFileSync(
+      join(binDir, 'mcode'),
+      `#!/bin/sh\nexec "${process.execPath}" "${HOST_SCRIPT}" "$@"\n`,
+      { mode: 0o755 },
+    );
+  });
+
+  afterEach(() => {
+    if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previousStateHome;
+  });
+
+  it('termina aunque el host falle, sin quedarse colgado', async () => {
+    const { code, elapsed, out } = await runHookProcess(workspace, binDir, {
+      FAKE_ACP_FAIL: 'initialize',
+    });
+
+    expect(code).toBe(0);
+    expect(elapsed).toBeLessThan(20_000);
+    expect(out).toBe('');
+  });
+
+  it('termina aunque el host no conteste', async () => {
+    // Un host que no dice nada: el hook tiene que rendirse, no esperar.
+    const mudo = tempDir('gcl-proceso-mudo-');
+    writeFileSync(join(mudo, 'mcode'), '#!/bin/sh\nsleep 300\n', { mode: 0o755 });
+
+    const { code, elapsed } = await runHookProcess(workspace, mudo, {
+      GOAL_COMPASS_REQUEST_TIMEOUT_MS: '2000',
+    });
+
+    expect(code).toBe(0);
+    expect(elapsed).toBeLessThan(20_000);
   });
 });
 

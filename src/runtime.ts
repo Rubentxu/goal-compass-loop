@@ -20,7 +20,7 @@ import { WorkspaceEvidenceScanner } from './adapters/discovery.js';
 import { SessionExploration } from './adapters/exploration.js';
 import { ChainLock, decideDriving } from './adapters/ownership.js';
 import { ProposalCandidatePort } from './adapters/proposals.js';
-import type { Driver, Journal } from './core/types.js';
+import { emptyMetrics, normalizeJournal, type Driver, type Journal } from './core/types.js';
 import type { CandidatePort, Logger } from './ports.js';
 import { Supervisor } from './supervisor.js';
 
@@ -40,6 +40,12 @@ export interface MissionRuntimeOptions {
   exploration?: boolean;
   pollIntervalMs?: number;
   maxIterations?: number;
+  /**
+   * Adaptador ya construido, cuando quien llama quiere hacerse cargo de su
+   * vida. Sirve para poder cerrar el host aunque la mision no llegue a
+   * arrancarse.
+   */
+  adapter?: AcpGoalAdapter;
 }
 
 export interface MissionRuntime {
@@ -109,13 +115,15 @@ export async function ensureMissionState(
       explored: [],
       explorationStreak: 0,
       lastExplorationAt: undefined,
+      budgetAttempts: [],
+      metrics: emptyMetrics(),
       updatedAt: new Date().toISOString(),
     };
     await journal.saveAtomically(initial);
     logger.info(`mision "${config.missionId}" inicializada en ${journal.filePath}`);
     return initial;
   }
-  return existing;
+  return normalizeJournal(existing);
 }
 
 /**
@@ -127,7 +135,10 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
   const driver = options.driver ?? 'supervisor';
   const journal = new FileJournal(config.missionId);
 
-  const existing = await journal.load();
+  // Un journal escrito antes de que existieran los intentos y las medidas se
+  // completa al leerlo: el estado viejo sigue siendo utilizable.
+  const stored = await journal.load();
+  const existing = stored ? normalizeJournal(stored) : null;
   const mission = existing?.mission ?? toMission(config);
 
   // El estado durable vive fuera del repositorio, en una carpeta que se nombra
@@ -152,20 +163,22 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
   });
 
   let supervisor: Supervisor | undefined;
-  const adapter = new AcpGoalAdapter({
-    workspace: config.workspace,
-    sessionId: options.sessionId ?? existing?.sessionId,
-    ...(options.host?.command !== undefined ? { command: options.host.command } : {}),
-    ...(options.host?.args !== undefined ? { args: options.host.args } : {}),
-    logger,
-    onGoalUpdate: (event) => {
-      logger.info(
-        `cambio de goal: estado=${event.goal?.status ?? 'sin goal'} ` +
-          `turnos=${event.goal?.turnsUsed ?? '-'} tokens=${event.goal?.tokensUsed ?? '-'}`,
-      );
-      supervisor?.notify();
-    },
-  });
+  const adapter =
+    options.adapter ??
+    new AcpGoalAdapter({
+      workspace: config.workspace,
+      sessionId: options.sessionId ?? existing?.sessionId,
+      ...(options.host?.command !== undefined ? { command: options.host.command } : {}),
+      ...(options.host?.args !== undefined ? { args: options.host.args } : {}),
+      logger,
+      onGoalUpdate: (event) => {
+        logger.info(
+          `cambio de goal: estado=${event.goal?.status ?? 'sin goal'} ` +
+            `turnos=${event.goal?.turnsUsed ?? '-'} tokens=${event.goal?.tokensUsed ?? '-'}`,
+        );
+        supervisor?.notify();
+      },
+    });
 
   supervisor = new Supervisor({
     goalPort: adapter,
@@ -221,10 +234,18 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
     await journal.saveAtomically(state);
   }
 
-  await adapter.start();
-  if (state.sessionId !== adapter.sessionId()) {
-    state.sessionId = adapter.sessionId();
-    await journal.saveAtomically(state);
+  // El host es un proceso: si algo falla despues de arrancarlo, hay que
+  // cerrarlo. Un host huerfano deja al que espera bloqueado, y el turno se
+  // queda colgado sin que nadie sepa por que.
+  try {
+    await adapter.start();
+    if (state.sessionId !== adapter.sessionId()) {
+      state.sessionId = adapter.sessionId();
+      await journal.saveAtomically(state);
+    }
+  } catch (err) {
+    await adapter.close().catch(() => {});
+    throw err;
   }
 
   return {

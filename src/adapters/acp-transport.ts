@@ -38,6 +38,13 @@ export interface AcpTransportOptions {
   /** Variables de entorno adicionales. */
   env?: NodeJS.ProcessEnv;
   logger: Logger;
+  /**
+   * Milisegundos que una peticion puede esperar antes de darse por perdida.
+   *
+   * Sin este tope, un host que no contesta deja a quien espera bloqueado para
+   * siempre: el turno se queda colgado sin que nadie sepa por que.
+   */
+  requestTimeoutMs?: number;
   /** Notificaciones del host que no son respuestas. */
   onNotification?: (method: string, params: unknown) => void;
   /** Peticiones del host que hay que responder. */
@@ -48,6 +55,9 @@ interface PendingCall {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
 }
+
+/** Tope de espera de una peticion al host. */
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * Conexion con un host ACP sobre la entrada y salida estandar de un proceso.
@@ -103,7 +113,7 @@ export class AcpTransport {
   }
 
   /** Envia una peticion y espera su respuesta. */
-  request<T>(method: string, params: unknown): Promise<T> {
+  request<T>(method: string, params: unknown, timeoutMs?: number): Promise<T> {
     const child = this.child;
     if (!child || this.closed) return Promise.reject(new Error('el host ACP no esta conectado'));
 
@@ -112,7 +122,24 @@ export class AcpTransport {
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
     });
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
-    return promise;
+
+    // Una peticion sin respuesta no se puede dejar esperando: se acabaria
+    // esperando hasta que el host la corte, y el turno se quedaria colgado.
+    // Cada peticion lleva su propio tope: preguntar al agente tarda minutos,
+    // pero el apretón de manos del host no puede tardar ni medio minuto.
+    const limit = timeoutMs ?? this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      const call = this.pending.get(id);
+      if (!call) return;
+      this.pending.delete(id);
+      this.options.logger.error(
+        `el host ACP no respondio a ${method} en ${limit}ms: se sigue sin esa respuesta`,
+      );
+      call.reject(new Error(`el host ACP no respondio a ${method}`));
+    }, limit);
+    timer.unref?.();
+
+    return promise.finally(() => clearTimeout(timer)) as Promise<T>;
   }
 
   /** Envia una notificacion: no espera respuesta. */

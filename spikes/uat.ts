@@ -45,6 +45,15 @@ function candidate(overrides: Partial<Candidate> = {}): Candidate {
 }
 
 /**
+ * Un trabajo largo.
+ *
+ * Sirve para gastar tokens de verdad: un objetivo que escribe una linea se
+ * termina antes de agotar el presupuesto, y entonces no hay nada que
+ * reintentar.
+ */
+const LARGO = Array.from({ length: 40 }, (_, index) => `linea ${index + 1} del trabajo largo`).join(' ');
+
+/**
  * El primer Goal termina y el supervisor crea el siguiente sin intervencion.
  *
  * El trabajo del medio llega por el canal de propuestas, como cuando el agente
@@ -303,10 +312,10 @@ const pause: Scenario = {
   },
 };
 
-/** Agotado el presupuesto de la mision, no se encadena otro Goal. */
+/** El presupuesto de la mision es una medida: la cadena sigue. */
 const budget: Scenario = {
   name: 'budget',
-  description: 'Agotado el presupuesto de la mision, la cadena se detiene sin crear Goals de mas',
+  description: 'Superado el presupuesto de la mision, la cadena sigue y el gasto queda medido',
   async run(context: ScenarioContext): Promise<Check[]> {
     await context.setCandidates([
       candidate({ candidateId: 'primero' }),
@@ -317,37 +326,108 @@ const budget: Scenario = {
         priority: 5,
       }),
     ]);
-    // El presupuesto se fija antes de empezar: el primer objetivo se crea
-    // porque aun no se ha gastado nada, y el segundo ya no entra.
+    // El presupuesto se fija antes de empezar: en cuanto el primer objetivo
+    // gaste algo, la mision lo ha superado.
     await context.patchMission({ totalTokenBudget: 1 });
     context.startSupervisor();
 
-    await context.waitFor('el primer Goal terminado', async () => {
+    await context.waitForCompletedGoals(1);
+    await context.waitFor('el segundo objetivo encadenado', async () => {
       const state = await context.readJournal();
-      return state.goals.length >= 1;
-    });
-
-    await context.waitFor('la mision dormida por presupuesto', async () => {
-      const state = await context.readJournal();
-      return state.mission.status === 'parked' && (state.mission.reason ?? '').includes('presupuesto');
+      return state.intents.filter((intent) => intent.status === 'committed').length >= 2;
     });
 
     const state = await context.readJournal();
     const created = state.intents.filter((intent) => intent.status === 'committed');
 
     return [
-      { name: 'la mision quedo dormida', ok: state.mission.status === 'parked' },
       {
-        name: 'el motivo es el presupuesto',
-        ok: (state.mission.reason ?? '').includes('presupuesto'),
-        detail: state.mission.reason,
+        name: 'la cadena no se detuvo por el presupuesto',
+        ok: created.length >= 2,
+        detail: `${created.length} objetivo(s)`,
       },
-      { name: 'no se encadenó un segundo Goal', ok: created.length === 1, detail: `${created.length}` },
+      {
+        name: 'el gasto quedo medido',
+        ok: (state.metrics?.tokensUsed ?? 0) > 0,
+        detail: `${state.metrics?.tokensUsed ?? 0} token(s)`,
+      },
+      {
+        name: 'el presupuesto superado quedo anotado',
+        ok: state.metrics?.budgetExceeded === true,
+      },
     ];
   },
 };
 
-const SCENARIOS: Record<string, Scenario> = { chain, recovery, pause, budget, exploration };
+/**
+ * Un objetivo sin presupuesto no se pierde: vuelve a la cola con mas margen.
+ *
+ * El presupuesto del objetivo se deja pequeno a proposito, para que el host
+ * lo agote. Lo que se comprueba es que la cadena no se queda esperando: el
+ * mismo trabajo se vuelve a encolar con el doble de margen, y el intento
+ * agotado queda anotado con su coste.
+ */
+const retry: Scenario = {
+  name: 'retry',
+  description: 'El objetivo que se queda sin presupuesto vuelve a la cola con mas margen',
+  async run(context: ScenarioContext): Promise<Check[]> {
+    await context.setCandidates([
+      candidate({
+        candidateId: 'reintento',
+        objective: fileGoal('resultado-retry.txt', LARGO),
+        doneWhen: ['resultado-retry.txt existe con el contenido exacto pedido'],
+      }),
+    ]);
+    // Un presupuesto pequeno hace que el objetivo se quede sin margen.
+    await context.patchMission({ defaultTokenBudget: 3000 });
+    context.startSupervisor();
+
+    await context.waitFor('el objetivo sin presupuesto anotado', async () => {
+      const state = await context.readJournal();
+      return state.budgetAttempts.length >= 1;
+    });
+
+    const state = await context.readJournal();
+    const created = state.intents.filter((intent) => intent.status === 'committed');
+    const key = created[0]?.candidateKey;
+    const mismoTrabajo = created.filter((intent) => intent.candidateKey === key);
+    const antes = mismoTrabajo[0]?.tokenBudget ?? 0;
+    const despues = mismoTrabajo[1]?.tokenBudget ?? 0;
+
+    return [
+      {
+        name: 'el intento agotado quedo anotado',
+        ok: state.budgetAttempts.length >= 1,
+        detail: `${state.budgetAttempts.length}`,
+      },
+      {
+        name: 'el trabajo volvio a la cola',
+        ok: mismoTrabajo.length >= 2,
+        detail: `${mismoTrabajo.length} intento(s)`,
+      },
+      {
+        name: 'el reintento lleva mas margen',
+        ok: despues > antes,
+        detail: `${antes} -> ${despues}`,
+      },
+      {
+        name: 'el gasto del intento agotado cuenta',
+        ok: (state.budgetAttempts[0]?.tokensUsed ?? 0) > 0,
+        detail: `${state.budgetAttempts[0]?.tokensUsed ?? 0} token(s)`,
+      },
+      { name: 'la mision no quedo escalada', ok: state.mission.status !== 'escalated' },
+    ];
+  },
+};
+
+const SCENARIOS: Record<string, Scenario> = {
+  chain,
+  recovery,
+  pause,
+  budget,
+  retry,
+  exploration,
+};
 
 async function main(): Promise<void> {
   const requested = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));

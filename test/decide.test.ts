@@ -50,6 +50,9 @@ describe('decide · nucleo puro', () => {
           candidateId: 'c1',
           candidateKey: 'k1',
           objective: 'objetivo',
+          hostObjective: 'objetivo',
+          evidenceRefs: [],
+          doneWhen: [],
           tokenBudget: 1_000,
           createdAt: '2026-01-01T00:00:00.000Z',
           status: 'intent',
@@ -82,7 +85,8 @@ describe('decide · nucleo puro', () => {
     expect(decision.kind).toBe('park');
   });
 
-  it('deja la mision dormida cuando se agota el presupuesto acumulado', () => {
+  it('sigue encadenando aunque el presupuesto de la mision se haya superado', () => {
+    // El presupuesto mide lo que ha costado el trabajo; medir no es impedir.
     const decision = decide(
       aSnapshot({
         goal: aGoal({ status: 'complete' }),
@@ -91,7 +95,7 @@ describe('decide · nucleo puro', () => {
         tokensUsedTotal: 10_000,
       }),
     );
-    expect(decision.kind).toBe('park');
+    expect(decision.kind).toBe('create');
   });
 
   it('sigue encadenando mientras queda presupuesto de mision', () => {
