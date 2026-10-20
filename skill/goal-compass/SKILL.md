@@ -57,6 +57,18 @@ silencio. El identificador por defecto se deriva del nombre y de la ruta del
 proyecto, de modo que es distinto en cada uno; si el proyecto ya tiene uno
 propio, se respeta tal cual.
 
+Si la misión existe pero **la cadena no encadena**, el motivo está en la
+declaración: un candidato sin evidencia o sin criterio de cierre se descarta,
+y una referencia rota no lleva a ninguna parte. El diagnóstico lo dice:
+
+```bash
+node ~/.minimax/plugins/goal-compass/dist/cli.js doctor --workspace <directorio del proyecto>
+```
+
+Solo lee: no escribe en el proyecto. Y si el trabajo sale de un documento,
+la referencia tiene que apuntar a algo que exista (`docs/roadmap.md#2.2`).
+La prioridad va de mayor a menor: más alto, antes.
+
 ## Protocolo
 
 1. Identifica objetivo verificable, evidencia ya observada y bloqueo actual; distingue hechos de conjeturas. Si el objetivo es pequeño, entra directamente en la fase pertinente.

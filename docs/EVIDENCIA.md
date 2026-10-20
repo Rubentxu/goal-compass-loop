@@ -1691,8 +1691,83 @@ se midió en el journal de la misión.
   que el proceso vivo no puede depender solo de ese hook: se apaga también
   cuando su dueño desaparece.
 
-## 14 · Lo que NO se ha ejecutado
+## 14 · Una declaración puede no valer nada, y decirlo
 
+### 14.1 Lo que se encontró mirando fuera
+
+Al auditar las misiones declaradas en los demás proyectos **con el cargador
+real del plugin**, una de ellas tenía sus **22 candidatos descartados**:
+
+```text
+cognicode
+  candidatos: 22 | usables: 0 | descartados: 22 | con problemas
+  - [campo-desconocido] (22: C2, C3, C4, ...) el campo "evidence" no lo lee el cargador
+      el campo que si se lee es "evidenceRefs"
+  - [sin-evidencia] (22: C2, C3, C4, ...) el candidato se descarta: no tiene evidencia
+  - [prioridad-invertida] ((C2)) el primer candidato del fichero tiene la prioridad mas baja
+```
+
+La causa era un nombre de campo: la evidencia estaba en `evidence` (uno) y el
+cargador lee `evidenceRefs` (una lista). El valor era una ruta que existía y
+el autor creía que la había dejado. Los **22** candidatos quedaron sin
+evidencia, el filtro los descartó, y la cadena no tenía nada que encadenar.
+
+La prioridad iba además al revés: el selector ordena de mayor a menor
+(`src/core/decide.ts:300`), y el primer candidato del fichero tenía la
+prioridad más baja. Con la cola escrita así, la cadena habría empezado por
+otro candidato del que la propia auditoría del proyecto nombraba como el
+siguiente.
+
+**Comprobación del antes y el después**, con el código real:
+
+| | antes | después |
+|---|---|---|
+| candidatos usables | 0 de 22 | 22 de 22 |
+| descartados | 22 | 0 |
+| elegido por el selector | (ninguno) | C2, el que nombra la auditoría |
+
+El diagnóstico se hizo **sin escribir en ningún proyecto**: se leyó el fichero
+declaración y se ejecutó el cargador, nada más.
+
+### 14.2 Lo que hace ahora el producto
+
+- **`declare` deja de dar por buena una declaración inútil.** Con una
+  declaración de mentira, escrita con el campo equivocado:
+
+  ```text
+  candidatos: 1 | usables: 0 | descartados: 1
+  AVISO [campo-desconocido] (trabajo-1) el campo "evidence" no lo lee el cargador
+        el campo que si se lee es "evidenceRefs"
+  AVISO [sin-evidencia] (trabajo-1) el candidato se descarta: no tiene evidencia
+        su campo evidenceRefs tiene que traer al menos una referencia
+  ```
+
+- **`doctor` audita la flota entera, solo lectura.** Sobre las ocho misiones
+  que el estado durable conoce: seis están listas, y dos tienen problemas que
+  se dicen con su motivo y con su arreglo debajo.
+
+- **Las referencias se comprueban**: la ruta tiene que existir y, si lleva
+  ancla, el ancla tiene que estar en el fichero (identificador explícito,
+  número de sección o título como lo convierte GitHub en enlace).
+
+### 14.3 La prueba que falla sin el cambio
+
+Comprobación rojo-verde con la CLI en su estado anterior: la prueba del
+diagnóstico falla (`expect(code).toBe(0)` — el comando no existía) y vuelve a
+pasar con el comando dentro. Las nueve pruebas nuevas cubren la evidencia
+mal escrita, la referencia rota, el ancla que no existe, la cola invertida y
+el hecho de que el diagnóstico no escribe en el proyecto que audita.
+
+**Suite completa: 187 pruebas en verde, 16 ficheros.**
+
+## 15 · Lo que NO se ha ejecutado
+
+- **El diagnóstico se ha probado contra misiones de verdad, pero no se ha
+  usado para arreglar ninguna.** Se écritó, se leyó y se dijo qué pasaba; el
+  arreglo de las misiones que tienen problemas es de quien las posee, y este
+  proyecto no las toca. Lo que sí se ha comprobado es que el diagnóstico
+  **no escribe**: hay una prueba que lee el fichero antes y después y
+  comprueba que es el mismo.
 - **El plugin no se ha probado en la interfaz gráfica.** La validación se ha
   hecho con `mcode exec`, que es la misma ruta de hooks pero sin pantalla.
 - **El servidor de herramientas no se ha probado desde la interfaz gráfica.**

@@ -85,6 +85,141 @@ el camino de reserva sigue funcionando. Verificado contra el host real.
 
 ---
 
+<a id="p11"></a>
+
+## 11 · La declaración se comprueba al declararla
+
+**Prioridad:** máxima · **Estado:** hecha y medida · **Desbloquea:** que la cadena
+no se quede sin trabajo por un campo mal escrito
+
+**El hueco.** El cargador de candidatos lee unos campos y solo esos. Una
+declaración escrita con el vocabulario equivocado se lee entera, pasa la
+validación y **no vale para nada**: sus candidatos quedan descartados y la
+cadena no tiene nada que encadenar. El caso real: el campo de la evidencia se
+llamaba `evidence` (uno) cuando el que se lee es `evidenceRefs` (una lista).
+El valor era una ruta que existía, el autor creía que la había dejado, y la
+declaración **decía** que llevaba la evidencia.
+
+Declarar no lo detectaba: releía el fichero y daba por buena una declaración
+que no servía.
+
+**Evidencia.**
+
+- `src/adapters/mission.ts` — `parseCandidate` lee `evidenceRefs` y nada más:
+  un campo con otro nombre se pierde sin decir nada.
+- `src/core/decide.ts:45` — `candidateDefect` descarta el candidato sin
+  evidencia, y esa es la regla que decide qué se encadena.
+- `src/cli.ts` — `declare` releía la configuración y no contaba los candidatos
+  que el selector iba a descartar.
+
+**Condición de cierre.**
+
+- Al declarar, se dice cuántos candidatos quedan usables y cuántos se
+  descartan, con el motivo de cada uno.
+- Un campo que no se lee pero que se parece a uno que sí, dice cuál era el
+  campo bueno.
+- Hay una prueba que falla sin el cambio y pasa con él.
+
+**Alcance.** `src/adapters/declaration-audit.ts`, `src/cli.ts`,
+`test/declaration-audit.test.ts`.
+
+---
+
+<a id="p12"></a>
+
+## 12 · Un diagnóstico de la flota, que no toca nada
+
+**Prioridad:** alta · **Estado:** hecha y medida · **Depende de:** 11
+
+**El hueco.** El plugin conoce su misión y dice cómo va. De las demás no dice
+nada: no hay forma de saber si una misión declarada en otro proyecto puede
+encadenar o si sus candidatos se quedan todos en la cuneta. La respuesta
+existe, pero había que construirla a mano: leer el cargador, cargar cada
+declaración, contar los descartados y comprobar que cada ruta de evidencia
+apuntara a algo.
+
+Un diagnóstico que además **escriba** en el proyecto ajeno no serviría: para
+mirar el estado de las misiones de los demás hace falta poder mirar sin
+tocar.
+
+**Evidencia.**
+
+- `src/plugin/mission-locator.ts` — la misión se localiza a partir del
+  directorio de trabajo: no hay forma de enumerarlas.
+- `src/cli.ts` — todos los comandos trabajan con un workspace o una misión.
+- `src/adapters/journal.ts` — el estado durable ya sabe, por misión, de qué
+  proyecto es: la flota se puede enumerar.
+
+**Condición de cierre.**
+
+- Hay un comando que audita todas las misiones declaradas y dice, de cada una,
+  cuántos candidatos son usables, cuáles se descartan y por qué, y qué
+  referencias no apuntan a nada.
+- El diagnóstico **solo lee**: no escribe en ningún proyecto, ni en el suyo.
+- Hay una prueba que falla sin el cambio y pasa con él.
+
+**Alcance.** `src/adapters/declaration-audit.ts`, `src/cli.ts`,
+`test/declaration-audit.test.ts`.
+
+---
+
+<a id="p13"></a>
+
+## 13 · La referencia a la evidencia se comprueba
+
+**Prioridad:** media-alta · **Estado:** hecha y medida · **Depende de:** 11
+
+**El hueco.** La evidencia es texto: una lista de cadenas que nadie comprueba.
+Una referencia puede apuntar a un fichero que se movió, y entonces el agente
+recibe un puntero a la nada sin que nada se entere: la evidencia es lo que
+justifica el trabajo, y una evidencia que no existe no justifica nada.
+
+**Evidencia.**
+
+- `src/adapters/mission.ts` — `evidenceRefs` es una lista de cadenas sin
+  ninguna comprobación.
+- `src/core/types.ts` — la evidencia viaja como texto hasta el objetivo.
+
+**Condición de cierre.**
+
+- La auditoría dice qué referencias no apuntan a ningún fichero.
+- Una referencia con ancla se comprueba contra el ancla del fichero de
+  destino: un id explícito, el número de una sección o su título.
+- El formato de la referencia está escrito en un sitio, no repartido.
+
+**Alcance.** `src/adapters/declaration-audit.ts`,
+`test/declaration-audit.test.ts`.
+
+---
+
+<a id="p14"></a>
+
+## 14 · La prioridad dice lo que quiere decir
+
+**Prioridad:** media · **Estado:** hecha y medida · **Depende de:** 11
+
+**El hueco.** El selector ordena de mayor a menor: más alto, antes. Eso no lo
+decía nadie, y una cola escrita al revés —«1 es lo más urgente»— hace que la
+cadena empiece por el último candidato. En una declaración real, la auditoría
+del proyecto nombraba un candidato como el siguiente y la cadena habría
+empezado por otro, sin decir nada.
+
+**Evidencia.**
+
+- `src/core/decide.ts:300` — el selector ordena por prioridad descendente.
+- Las declaraciones en el mundo usan los dos sentidos, y nada lo dice.
+
+**Condición de cierre.**
+
+- La auditoría avisa cuando el primer candidato del fichero tiene la
+  prioridad más baja: la cadena empezaría por el final.
+- El sentido de la prioridad está escrito donde se valida la declaración.
+
+**Alcance.** `src/adapters/declaration-audit.ts`,
+`test/declaration-audit.test.ts`.
+
+---
+
 <a id="p0"></a>
 
 ## 0 · El objetivo del usuario no se le cobra a la misión
@@ -314,6 +449,10 @@ y el razonamiento nuevo vive en el cuerpo de la documentación.
 | 8 | El presupuesto guía, no frena | máxima | — |
 | 9 | El hook da continuidad y llega a tiempo | máxima | — |
 | 10 | La continuidad no depende de que la sesión sea pequeña | máxima | 9 |
+| 11 | La declaración se comprueba al declararla | máxima | — |
+| 12 | Un diagnóstico de la flota, que no toca nada | alta | 11 |
+| 13 | La referencia a la evidencia se comprueba | media-alta | 11 |
+| 14 | La prioridad dice lo que quiere decir | media | 11 |
 
 ---
 

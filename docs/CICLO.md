@@ -719,6 +719,67 @@ era el camino principal es el de reserva, y al revés.
 reloj.** El margen no la arregla: la hace saltar antes. Lo que la arregla es
 **pagarla una vez**, en el momento en que todavía es barata.
 
+### 3.20 Una declaración puede no valer nada, y decirlo
+
+Este ciclo nació de mirar fuera: al auditar las misiones declaradas en otros
+proyectos con el cargador real del plugin, una de ellas tenía **sus 22
+candidatos descartados**. No por calidad del trabajo: por un nombre de campo.
+
+El cargador de candidatos lee unos campos y solo esos. La evidencia estaba
+escrita en `evidence` —uno solo— cuando el campo que se lee es `evidenceRefs`
+—una lista—. El valor era una ruta que existía, el autor creía que la había
+dejado, y la propia auditoría del proyecto **decía** que la backlog llevaba
+evidencia. Al cargarla, los 22 candidatos quedaron sin evidencia: el filtro
+los descartó y la cadena no tenía nada que encadenar. En ese proyecto la
+cadena llevaba tiempo sin trabajar y no había ninguna señal.
+
+El resto de misiones estaban bien, pero ese defecto no lo cazaba ninguna
+prueba de este proyecto: sus pruebas miran su propia declaración, y la de los
+demás no la ven.
+
+#### Lo que se hizo
+
+- **La declaración se audita.** Un módulo nuevo la mira tal cual está, sobre
+  el fichero en crudo, y dice qué se va a perder: los campos que el cargador no
+  lee, los candidatos que quedarían descartados y por qué, las referencias que
+  no apuntan a ningún fichero y las anclas que no existen.
+- **`declare` deja de dar por buena una declaración inútil.** Dice cuántos
+  candidatos quedan usables, cuántos se descartan, y —cuando el campo está
+  escrito con otro nombre— cuál era el que había que escribir.
+- **`doctor` diagnostica la flota entera, sin tocar nada.** Lista todas las
+  misiones que el estado durable conoce y dice, de cada una, si puede
+  encadenar y qué le pasa. **Solo lee**: un diagnóstico que arregla por el
+  camino no sirve para preguntar cómo están las cosas.
+
+#### Lo que se vio al medirlo
+
+```text
+agentchanges-ef3c            .../agentChanges
+  candidatos: 6 | usables: 6 | descartados: 0 | lista
+cognicode                    .../CogniCode
+  candidatos: 22 | usables: 0 | descartados: 22 | con problemas
+  - [campo-desconocido] (22: C2, C3, C4, ...) el campo "evidence" no lo lee el cargador
+      el campo que si se lee es "evidenceRefs"
+  - [sin-evidencia] (22: C2, C3, C4, ...) el candidato se descarta: no tiene evidencia
+      su campo evidenceRefs tiene que traer al menos una referencia
+  - [prioridad-invertida] ((C2)) el primer candidato del fichero tiene la prioridad mas baja
+      la prioridad va de mayor a menor: mas alto, antes
+2 de 8 mision(es) con problemas.
+```
+
+La prioridad invertida salía del mismo sitio: la cola del proyecto estaba
+escrita al revés y el selector, que ordena de mayor a menor, habría empezado
+por el candidato equivocado. Nada de eso se había dicho en ninguna parte.
+
+#### La lección
+
+**Un sistema que solo se prueba a sí mismo no ve los defectos de su
+vocabulario.** El cargador leía `evidenceRefs`; el mundo escribía `evidence`.
+Los dos tenían razón, y entre los dos no había un contrato. La lección no es
+«escribe el campo correcto»: es **que el que escribe tiene que poder saber si
+ha escrito el campo correcto**, y para eso hace falta algo que mire el
+fichero en crudo y diga qué se pierde.
+
 ## 4. Cómo se usa
 
 ### Con el plugin (lo recomendado)
@@ -769,6 +830,29 @@ Si prefieres escribirla a mano, el fichero se llama `goal-compass.json` y el
 Abre una sesión de MCode en ese repositorio y pide:
 
 > Continúa la misión de este repositorio.
+
+#### Cómo se lee una referencia
+
+La evidencia de un candidato dice de dónde sale el trabajo. Se escribe como
+una ruta **relativa al proyecto donde vive la declaración**, y opcionalmente
+con un ancla detrás:
+
+| Referencia | Qué señala | Cómo se comprueba |
+|---|---|---|
+| `docs/triage.md` | el fichero entero | el fichero tiene que existir |
+| `docs/triage.md#terraform-edges` | un punto concreto | además, el ancla tiene que existir |
+| `docs/roadmap.md#2.2` | el número de una sección | tiene que haber un título que empiece por ese número |
+
+Un ancla puede ser un identificador explícito (`<a id="p1"></a>`), el número de
+una sección (`### 2.2 …`) o el título de una sección tal como GitHub lo
+convierte en enlace (`## Conclusión final` → `conclusion-final`).
+
+La **prioridad va de mayor a menor**: más alto, antes. El selector ordena así,
+y una cola escrita al revés hace que la cadena empiece por el último
+candidato.
+
+Nada de esto se avisa solo: `declare` dice cuántos candidatos quedan usables y
+`doctor` audita todas las misiones declaradas.
 
 Cada vez que el agente termina su turno, el hook comprueba el objetivo en curso:
 si está terminado, crea el siguiente en esa misma sesión y le devuelve el turno.
