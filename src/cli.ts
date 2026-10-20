@@ -7,18 +7,20 @@
  * pause o continue. La orden del usuario viaja por un canal de control
  * separado del journal, de modo que nunca se pisa el estado de ejecucion.
  */
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { AcpGoalAdapter } from './adapters/acp-goal.js';
 import { FileControlPort } from './adapters/control.js';
-import { FileJournal, journalPath } from './adapters/journal.js';
+import { FileJournal, journalPath, stateRoot } from './adapters/journal.js';
 import { declareMission, loadMissionConfig } from './adapters/mission.js';
+import { auditDeclaration } from './adapters/declaration-audit.js';
 import { openMission, ensureMissionState } from './runtime.js';
 import { loadTree, validateTree } from './adapters/tree.js';
 import { ensureWorkdir, treeDirFor } from './adapters/workdir.js';
+import { findMissionFile } from './plugin/mission-locator.js';
 import {
   defaultMarketplaceDir,
   installPlugin,
@@ -47,6 +49,8 @@ const USAGE = `Goal Compass Loop · supervisor de Goals nativos
   goal-compass pause|resume|stop --mission <id>   ordenes del usuario
   goal-compass probe  --workspace <dir>           comprueba la extension ACP del host
   goal-compass tree   --workspace <dir>           prepara el arbol del proyecto y lo valida
+  goal-compass doctor --workspace <dir>           audita una declaracion de mision
+  goal-compass doctor                            audita todas las misiones declaradas
   goal-compass install-skill                       instala la skill goal-compass
   goal-compass install-plugin                      ensambla el plugin de MCode
 
@@ -96,6 +100,127 @@ function optionalNumber(values: Options, name: string): number | undefined {
 }
 
 // ------------------------------------------------------------------ comandos
+
+/**
+ * Diagnostico de las misiones declaradas.
+ *
+ * Solo lee. No escribe en ningun proyecto, ni en el suyo: un diagnostico que
+ * arregla por el camino no se puede usar para preguntar como estan las cosas.
+ *
+ * Sin argumentos, audita todas las misiones que el estado durable conoce, que
+ * es como se ve la flota: que mision puede encadenar y cual no, y por que.
+ */
+async function cmdDoctor(values: Options): Promise<void> {
+  const workspaces = workspacesToAudit(values);
+  if (workspaces.length === 0) {
+    console.log('no hay ninguna mision declarada que diagnosticar');
+    return;
+  }
+
+  let conProblemas = 0;
+  for (const { missionId, workspace } of workspaces) {
+    const path = findMissionFile(workspace);
+    if (!path) {
+      console.log(`${missionId.padEnd(28)} ${workspace}`);
+      console.log('  sin declaracion: no hay ningun goal-compass.json que leer');
+      conProblemas += 1;
+      continue;
+    }
+
+    let audit;
+    try {
+      audit = auditDeclaration(path, { workspace });
+    } catch (err) {
+      console.log(`${missionId.padEnd(28)} ${workspace}`);
+      console.log(`  la declaracion no se puede leer: ${(err as Error).message}`);
+      conProblemas += 1;
+      continue;
+    }
+
+    const estado = audit.problems.length === 0 ? 'lista' : 'con problemas';
+    console.log(
+      `${missionId.padEnd(28)} ${workspace}\n` +
+        `  candidatos: ${audit.candidates} | usables: ${audit.ready} | descartados: ${audit.discarded} | ${estado}`,
+    );
+
+    // Agrupado por tipo: veinte candidatos con el mismo defecto son una
+    // linea, no veinte.
+    for (const [kind, grupo] of groupBy(audit.problems, (p) => p.kind)) {
+      const donde = grupo[0]!.candidateId;
+      const lista =
+        grupo.length === 1
+          ? `((${donde}))`
+          : `(${grupo.length}: ${grupo
+              .map((p) => p.candidateId)
+              .filter((id): id is string => typeof id === 'string')
+              .slice(0, 8)
+              .join(', ')}${grupo.length > 8 ? ', ...' : ''})`;
+      console.log(`  - [${kind}] ${lista} ${grupo[0]!.detail}`);
+      if (grupo[0]!.hint) console.log(`      ${grupo[0]!.hint}`);
+    }
+    if (audit.ignoredFields.length > 0) {
+      console.log(
+        `  campos que el cargador no lee y no son problema: ${audit.ignoredFields.join(', ')}`,
+      );
+    }
+    if (audit.problems.length > 0) conProblemas += 1;
+  }
+
+  if (conProblemas > 0) {
+    console.log('');
+    console.log(`${conProblemas} de ${workspaces.length} mision(es) con problemas.`);
+  }
+}
+
+/**
+ * Agrupa por una clave, conservando el orden en que aparecen.
+ */
+function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
+  const grupos = new Map<string, T[]>();
+  for (const item of items) {
+    const k = key(item);
+    const grupo = grupos.get(k);
+    if (grupo) grupo.push(item);
+    else grupos.set(k, [item]);
+  }
+  return grupos;
+}
+
+/**
+ * Las misiones a auditar.
+ *
+ * Con `--workspace` se audita esa; con `--mission`, la que diga el estado
+ * durable; sin nada, todas las que el estado durable conoce.
+ */
+function workspacesToAudit(values: Options): { missionId: string; workspace: string }[] {
+  const workspace = typeof values.workspace === 'string' ? values.workspace : undefined;
+  if (workspace) {
+    const resolved = resolve(workspace);
+    return [{ missionId: basename(resolved), workspace: resolved }];
+  }
+
+  const root = stateRoot();
+  if (!existsSync(root)) return [];
+
+  const missions: { missionId: string; workspace: string }[] = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const journal = join(root, entry.name, 'journal.json');
+    if (!existsSync(journal)) continue;
+    try {
+      const state = JSON.parse(readFileSync(journal, 'utf8')) as {
+        missionId?: string;
+        mission?: { workspace?: string };
+      };
+      const missionWorkspace = state.mission?.workspace;
+      if (!missionWorkspace) continue;
+      missions.push({ missionId: state.missionId ?? entry.name, workspace: missionWorkspace });
+    } catch {
+      // Un journal ilegible no es una mision que auditar: se salta.
+    }
+  }
+  return missions.sort((a, b) => a.missionId.localeCompare(b.missionId));
+}
 
 /**
  * Declara la mision de un proyecto.
@@ -151,6 +276,20 @@ async function cmdDeclare(values: Options): Promise<void> {
   logger.info(`objetivo: ${config.objective}`);
   logger.info(`conduce: ${config.driver ?? 'plugin'}`);
   logger.info(`estado durable: ${journalPath(config.missionId)}`);
+
+  // Declarar no es solo escribir: es decir si lo escrito sirve. Una
+  // declaracion con el campo de la evidencia mal escrito se lee entera y no
+  // vale para nada, y eso hay que decirlo aqui, no tres semanas despues.
+  const audit = auditDeclaration(declared.path, { workspace });
+  logger.info(
+    `candidatos: ${audit.candidates} | usables: ${audit.ready} | descartados: ${audit.discarded}`,
+  );
+  for (const problema of audit.problems) {
+    const donde = problema.candidateId ? ` (${problema.candidateId})` : '';
+    logger.warn(`[${problema.kind}]${donde} ${problema.detail}`);
+    if (problema.hint) logger.warn(`  ${problema.hint}`);
+  }
+
   console.log('');
   console.log('abre una sesion en el proyecto y pide: "continua la mision de este repositorio".');
 }
@@ -375,6 +514,7 @@ const COMMANDS: Record<string, (values: Options) => Promise<void>> = {
   stop: controlCommand('stopped_by_user'),
   probe: cmdProbe,
   tree: cmdTree,
+  doctor: cmdDoctor,
   'install-skill': cmdInstallSkill,
   'install-plugin': cmdInstallPlugin,
 };
