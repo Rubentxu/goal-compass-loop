@@ -27,12 +27,22 @@ import {
   type Snapshot,
   type TransitionIntent,
 } from './core/types.js';
-import type { CandidatePort, Clock, ExplorationPort, GoalPort, JournalPort, Logger } from './ports.js';
+import type {
+  CandidatePort,
+  ChainLockPort,
+  Clock,
+  ExplorationPort,
+  GoalPort,
+  JournalPort,
+  Logger,
+} from './ports.js';
 
 export interface SupervisorOptions {
   goalPort: GoalPort;
   candidatePort: CandidatePort;
   journalPort: JournalPort;
+  /** Candado para encadenar: sin el, dos vias podrian crear a la vez. */
+  chainLock: ChainLockPort;
   /** Canal de control del usuario, en un fichero aparte del journal. */
   controlPort: { read(): Promise<Mission['status'] | null> };
   clock: Clock;
@@ -88,6 +98,7 @@ export class Supervisor {
   private readonly goalPort: GoalPort;
   private readonly candidatePort: CandidatePort;
   private readonly journalPort: JournalPort;
+  private readonly chainLock: ChainLockPort;
   private readonly controlPort: SupervisorOptions['controlPort'];
   private readonly explorationPort: ExplorationPort | undefined;
   private readonly clock: Clock;
@@ -103,6 +114,7 @@ export class Supervisor {
     this.goalPort = options.goalPort;
     this.candidatePort = options.candidatePort;
     this.journalPort = options.journalPort;
+    this.chainLock = options.chainLock;
     this.controlPort = options.controlPort;
     this.explorationPort = options.explorationPort;
     this.clock = options.clock;
@@ -340,6 +352,25 @@ export class Supervisor {
    * Devuelve el Goal confirmado, o `undefined` si no se pudo crear.
    */
   private async executeCreate(candidate: Candidate): Promise<GoalState | undefined> {
+    // Solo una via encadena a la vez. El cierre de turno del agente y el
+    // sondeo del supervisor ven el objetivo terminado en el mismo instante:
+    // sin este candado, los dos crearian el siguiente y uno se quedaria
+    // huerfano con sus tokens gastados.
+    const release = this.chainLock.acquire(this.clock.now());
+    if (!release) {
+      this.logger.info('otra via esta encadenando trabajo: se espera al siguiente ciclo');
+      return undefined;
+    }
+
+    try {
+      return await this.createGoal(candidate);
+    } finally {
+      release();
+    }
+  }
+
+  /** Crea el objetivo: primero se comprueba que toca, luego se encadena. */
+  private async createGoal(candidate: Candidate): Promise<GoalState | undefined> {
     const journal = await this.loadJournal();
     const sessionId = this.goalPort.sessionId();
 

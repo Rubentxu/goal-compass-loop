@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { Candidate, Mission } from '../core/types.js';
+import type { Candidate, Driver, Mission } from '../core/types.js';
 
 export interface MissionConfig {
   missionId: string;
@@ -19,6 +19,12 @@ export interface MissionConfig {
   explorationEnabled: boolean;
   explorationCooldownMs: number;
   allowRemoteWrite: boolean;
+  /**
+   * Camino que conduce la mision, cuando se declara.
+   *
+   * Sin declaracion, lo toma el primero que actue y el otro se aparta.
+   */
+  driver?: Driver | undefined;
   backlog: Candidate[];
 }
 
@@ -111,6 +117,7 @@ export function loadMissionConfig(
         ? c.explorationCooldownMs
         : DEFAULT_EXPLORATION_COOLDOWN_MS,
     allowRemoteWrite: c.allowRemoteWrite === true,
+    ...(c.driver === 'supervisor' || c.driver === 'plugin' ? { driver: c.driver } : {}),
     backlog: backlogRaw.map(parseCandidate),
   };
 }

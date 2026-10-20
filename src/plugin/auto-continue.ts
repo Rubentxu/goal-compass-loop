@@ -95,11 +95,17 @@ export async function runAutoContinue(
         configPath: mission.configPath,
         logger: log,
         sessionId,
+        driver: 'plugin',
         ...(options.host ? { host: options.host } : {}),
         // Preguntar al modelo por trabajo consume tiempo y el turno tiene un
         // limite: la exploracion la hace el agente, no el hook.
         exploration: false,
       });
+
+      if (!runtime.driving) {
+        log.info(`el hook no encadena nada: ${runtime.reason ?? 'la mision la conduce otro camino'}`);
+        return '';
+      }
 
       const outcome = await runtime.supervisor.step();
       if (!outcome.created) return '';

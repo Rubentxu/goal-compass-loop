@@ -47,6 +47,19 @@ export interface JournalPort {
   saveAtomically(journal: Journal): Promise<void>;
 }
 
+/**
+ * Candado exclusivo para la ventana en la que se encadena un objetivo.
+ *
+ * Dos caminos pueden ver el objetivo terminado en el mismo instante: el
+ * cierre de turno del agente y el sondeo del supervisor. Sin este candado,
+ * ambos crearian el siguiente y uno se quedaria huerfano con sus tokens
+ * gastados.
+ */
+export interface ChainLockPort {
+  /** Toma el candado y devuelve como soltarlo, o `null` si hay otra via. */
+  acquire(now?: number): (() => void) | null;
+}
+
 export interface Logger {
   info(message: string): void;
   warn(message: string): void;

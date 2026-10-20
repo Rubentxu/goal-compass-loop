@@ -17,8 +17,9 @@ import {
 } from './adapters/candidates.js';
 import { WorkspaceEvidenceScanner } from './adapters/discovery.js';
 import { SessionExploration } from './adapters/exploration.js';
+import { ChainLock, decideDriving } from './adapters/ownership.js';
 import { ProposalCandidatePort } from './adapters/proposals.js';
-import type { Journal } from './core/types.js';
+import type { Driver, Journal } from './core/types.js';
 import type { CandidatePort, Logger } from './ports.js';
 import { Supervisor } from './supervisor.js';
 
@@ -28,6 +29,8 @@ export interface MissionRuntimeOptions {
   /** Ruta del fichero de configuracion: el backlog se relee de ahi. */
   configPath: string;
   logger: Logger;
+  /** Camino que pide conducir la mision. */
+  driver?: Driver;
   /** Sesion ya existente que hay que Adoptar en lugar de crear. */
   sessionId?: string | undefined;
   /** Ejecutable del host y sus argumentos, cuando no es el de por defecto. */
@@ -42,6 +45,10 @@ export interface MissionRuntime {
   supervisor: Supervisor;
   adapter: AcpGoalAdapter;
   journal: FileJournal;
+  /** Si este camino puede conducir la mision. */
+  driving: boolean;
+  /** Por que no, cuando no puede. */
+  reason?: string;
 }
 
 /**
@@ -116,27 +123,25 @@ export async function ensureMissionState(
  */
 export async function openMission(options: MissionRuntimeOptions): Promise<MissionRuntime> {
   const { config, configPath, logger } = options;
+  const driver = options.driver ?? 'supervisor';
   const journal = new FileJournal(config.missionId);
 
-  const state = await ensureMissionState(config, journal, logger);
+  const existing = await journal.load();
+  const mission = existing?.mission ?? toMission(config);
 
-  // El fichero de mision manda sobre la intencion (backlog, workspace,
-  // presupuestos); el journal conserva el estado de ejecucion.
-  state.mission.backlog = config.backlog;
-  state.mission.workspace = config.workspace;
-  state.mission.defaultTokenBudget = config.defaultTokenBudget;
-  state.mission.totalTokenBudget = config.totalTokenBudget;
-  state.mission.maxGoals = config.maxGoals;
-  state.mission.stallTimeoutMs = config.stallTimeoutMs;
-  state.mission.explorationEnabled = config.explorationEnabled;
-  state.mission.explorationCooldownMs = config.explorationCooldownMs;
-  state.mission.allowRemoteWrite = config.allowRemoteWrite;
-  await journal.saveAtomically(state);
+  // El mando decide si este camino puede actuar. Sin declaracion, lo toma el
+  // primero que llegue; con declaracion, manda lo declarado.
+  const driving = decideDriving({
+    mission,
+    driver,
+    declared: config.driver,
+    now: Date.now(),
+  });
 
   let supervisor: Supervisor | undefined;
   const adapter = new AcpGoalAdapter({
     workspace: config.workspace,
-    sessionId: options.sessionId ?? state.sessionId,
+    sessionId: options.sessionId ?? existing?.sessionId,
     ...(options.host?.command !== undefined ? { command: options.host.command } : {}),
     ...(options.host?.args !== undefined ? { args: options.host.args } : {}),
     logger,
@@ -149,14 +154,11 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
     },
   });
 
-  await adapter.start();
-  state.sessionId = adapter.sessionId();
-  await journal.saveAtomically(state);
-
   supervisor = new Supervisor({
     goalPort: adapter,
     candidatePort: new ComposedCandidatePort(buildCandidatePorts(configPath, config.workspace)),
     journalPort: journal,
+    chainLock: new ChainLock(config.missionId),
     controlPort: new FileControlPort(config.missionId),
     ...(options.exploration === false
       ? {}
@@ -167,5 +169,54 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
     ...(options.maxIterations !== undefined ? { maxIterations: options.maxIterations } : {}),
   });
 
-  return { supervisor, adapter, journal };
+  // El camino que no conduce se aparta entero: no abre el host, no escribe en
+  // el journal y no deja el estado a medias. Apartarse no puede consistir en
+  // dejar a medias lo que va a trabajar otro camino.
+  if (!driving.drive) {
+    return {
+      supervisor,
+      adapter,
+      journal,
+      driving: false,
+      ...(driving.reason !== undefined ? { reason: driving.reason } : {}),
+    };
+  }
+
+  const state = existing ?? (await ensureMissionState(config, journal, logger));
+  const before = JSON.stringify(state);
+
+  // El fichero de mision manda sobre la intencion (backlog, workspace,
+  // presupuestos); el journal conserva el estado de ejecucion.
+  state.mission.backlog = config.backlog;
+  state.mission.workspace = config.workspace;
+  state.mission.defaultTokenBudget = config.defaultTokenBudget;
+  state.mission.totalTokenBudget = config.totalTokenBudget;
+  state.mission.maxGoals = config.maxGoals;
+  state.mission.stallTimeoutMs = config.stallTimeoutMs;
+  state.mission.explorationEnabled = config.explorationEnabled;
+  state.mission.explorationCooldownMs = config.explorationCooldownMs;
+  state.mission.allowRemoteWrite = config.allowRemoteWrite;
+
+  // Quien conduce deja su nombre y el momento en que lo tomo.
+  state.mission.driver = driver;
+  state.mission.driverAt = Date.now();
+
+  // Solo se escribe cuando algo cambio: reescribir el journal entero sin
+  // motivo puede pisar lo que otro proceso acaba de escribir.
+  if (JSON.stringify(state) !== before) {
+    await journal.saveAtomically(state);
+  }
+
+  await adapter.start();
+  if (state.sessionId !== adapter.sessionId()) {
+    state.sessionId = adapter.sessionId();
+    await journal.saveAtomically(state);
+  }
+
+  return {
+    supervisor,
+    adapter,
+    journal,
+    driving: true,
+  };
 }

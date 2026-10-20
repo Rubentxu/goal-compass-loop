@@ -65,6 +65,9 @@ export interface Candidate {
   tokenBudget?: number | undefined;
 }
 
+/** Quien conduce la cadena de objetivos de una mision. */
+export type Driver = 'supervisor' | 'plugin';
+
 /** Nivel de la mision, persistente e independiente del Goal. */
 export type MissionStatus =
   | 'running'
@@ -98,6 +101,15 @@ export interface Mission {
   reason?: string | undefined;
   /** Autorizado a empujar / publicar / desplegar. */
   allowRemoteWrite: boolean;
+  /**
+   * Camino que esta conduciendo la cadena.
+   *
+   * `undefined` significa que todavia nadie la ha tomado. Se escribe para que
+   * quede a la vista quien manda y para que el otro camino se aparte.
+   */
+  driver?: Driver | undefined;
+  /** Cuando se tomo el mando por ultima vez, para saber si sigue vigente. */
+  driverAt?: number | undefined;
 }
 
 /** Intencion de transicion persistida ANTES de llamar a `goal/create`. */

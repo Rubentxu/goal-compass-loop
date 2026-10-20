@@ -102,10 +102,11 @@ async function cmdRun(values: Options): Promise<void> {
   const configPath = requireString(values, 'config', '--config <mission.json>');
   const config = loadMissionConfig(configPath);
 
-  const { supervisor, adapter } = await openMission({
+  const { supervisor, adapter, driving, reason } = await openMission({
     config,
     configPath,
     logger,
+    driver: 'supervisor',
     ...(optionalNumber(values, 'poll-ms') !== undefined
       ? { pollIntervalMs: optionalNumber(values, 'poll-ms')! }
       : {}),
@@ -113,6 +114,12 @@ async function cmdRun(values: Options): Promise<void> {
       ? { maxIterations: optionalNumber(values, 'max-iterations')! }
       : {}),
   });
+
+  if (!driving) {
+    logger.warn(`esta mision no la conduce el supervisor: ${reason ?? 'la conduce otro camino'}`);
+    await adapter.close();
+    return;
+  }
 
   const shutdown = (): void => {
     logger.info('parada solicitada: cerrando el supervisor');
@@ -149,6 +156,7 @@ async function cmdStatus(values: Options): Promise<void> {
   }
   console.log(`motivo:   ${state.mission.reason ?? '-'}`);
   console.log(`session:  ${state.sessionId ?? '-'}`);
+  console.log(`conduce:  ${state.mission.driver ?? 'nadie todavia'}`);
   console.log(`goals:    ${state.goals.length} completado(s), ${committed.length} creado(s)`);
   console.log(`presupuesto: ${tokensUsed} token(s) consumidos`);
   for (const goal of state.goals) {
