@@ -5,9 +5,13 @@
  * pueden crear el mismo objetivo y uno se queda huerfano con sus tokens
  * gastados.
  */
-import { describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, expect, it, afterEach } from 'vitest';
+import { cleanupTempDirs, tempDir } from './support/temp.js';
+
+afterEach(cleanupTempDirs);
+import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+
+
 import { join } from 'node:path';
 import { ChainLock, decideDriving, DRIVER_LEASE_MS } from '../src/adapters/ownership.js';
 import { toMission, type MissionConfig } from '../src/adapters/mission.js';
@@ -94,7 +98,7 @@ describe('el mando de una mision', () => {
 
 describe('el camino que no conduce', () => {
   it('no abre el host ni escribe en el estado de la mision', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'gcl-apartado-'));
+    const root = tempDir('gcl-apartado-');
     const previous = process.env.XDG_STATE_HOME;
     process.env.XDG_STATE_HOME = root;
     try {
@@ -131,7 +135,7 @@ describe('el camino que no conduce', () => {
 
 describe('el candado de encadenado', () => {
   it('dos vias no pueden encadenar a la vez', () => {
-    const root = mkdtempSync(join(tmpdir(), 'gcl-candado-'));
+    const root = tempDir('gcl-candado-');
     const previous = process.env.XDG_STATE_HOME;
     process.env.XDG_STATE_HOME = root;
     try {
@@ -152,7 +156,7 @@ describe('el candado de encadenado', () => {
   });
 
   it('un candado huerfano no ata la mision', () => {
-    const root = mkdtempSync(join(tmpdir(), 'gcl-candado-'));
+    const root = tempDir('gcl-candado-');
     const previous = process.env.XDG_STATE_HOME;
     process.env.XDG_STATE_HOME = root;
     try {
@@ -175,7 +179,7 @@ describe('el candado de encadenado', () => {
   });
 
   it('el candado se guarda junto al estado de la mision', () => {
-    const root = mkdtempSync(join(tmpdir(), 'gcl-candado-'));
+    const root = tempDir('gcl-candado-');
     const previous = process.env.XDG_STATE_HOME;
     process.env.XDG_STATE_HOME = root;
     try {

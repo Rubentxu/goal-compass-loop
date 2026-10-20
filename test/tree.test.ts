@@ -6,21 +6,22 @@
  * si un nodo se queda sin salida o si la cabecera no se entiende, el agente se
  * pierde en silencio. Estas comprobaciones son su contrato.
  */
-import { describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, expect, it, afterEach } from 'vitest';
+import { cleanupTempDirs, tempDir } from './support/temp.js';
+
+afterEach(cleanupTempDirs);
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+
+
 import { join } from 'node:path';
 import { parseFrontmatter, parseYaml, YamlError } from '../src/adapters/yaml.js';
 import { loadTree, TreeError, validateTree } from '../src/adapters/tree.js';
 import { ensureWorkdir, treeDirFor } from '../src/adapters/workdir.js';
 
-function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), 'gcl-arbol-'));
-}
 
 /** Escribe un nodo con cabecera y cuerpo, y devuelve su directorio. */
 function treeOf(nodes: Record<string, string>): string {
-  const dir = tempDir();
+  const dir = tempDir('gcl-arbol-');
   for (const [name, content] of Object.entries(nodes)) {
     const path = join(dir, `${name}.md`);
     mkdirSync(join(path, '..'), { recursive: true });
@@ -193,7 +194,7 @@ describe('el arbol de decision', () => {
 
 describe('el directorio de trabajo', () => {
   it('se crea y queda ignorado por git', () => {
-    const dir = tempDir();
+    const dir = tempDir('gcl-arbol-');
     try {
       const state = ensureWorkdir(dir);
 
@@ -209,7 +210,7 @@ describe('el directorio de trabajo', () => {
   });
 
   it('no duplica la entrada del .gitignore', () => {
-    const dir = tempDir();
+    const dir = tempDir('gcl-arbol-');
     try {
       ensureWorkdir(dir);
       const state = ensureWorkdir(dir);
@@ -224,9 +225,9 @@ describe('el directorio de trabajo', () => {
   });
 
   it('el arbol propio del proyecto manda sobre el de la skill', () => {
-    const dir = tempDir();
+    const dir = tempDir('gcl-arbol-');
     try {
-      const fallback = tempDir();
+      const fallback = tempDir('gcl-arbol-');
       writeFileSync(join(fallback, 'index.md'), '# fallback\n', 'utf8');
 
       expect(treeDirFor(dir, fallback)).toEqual({ dir: fallback, source: 'skill' });

@@ -1,12 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, expect, it, afterEach } from 'vitest';
+import { cleanupTempDirs, tempDir } from './support/temp.js';
+
+afterEach(cleanupTempDirs);
+import { writeFileSync } from 'node:fs';
+
+
 import { join } from 'node:path';
 import { MissionConfigCandidatePort } from '../src/adapters/candidates.js';
 import { aMission } from './support/harness.js';
 
 function missionFile(backlog: unknown[]): string {
-  const directory = mkdtempSync(join(tmpdir(), 'gcl-mission-'));
+  const directory = tempDir('gcl-mission-');
   const path = join(directory, 'mission.json');
   writeFileSync(
     path,

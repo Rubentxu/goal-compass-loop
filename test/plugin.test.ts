@@ -6,8 +6,12 @@
  * que el turno continua, sin tocar el host real.
  */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+
+afterEach(cleanupTempDirs);
+import { cleanupTempDirs, tempDir } from './support/temp.js';
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+
+
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseHookEvent, runAutoContinue } from '../src/plugin/auto-continue.js';
@@ -20,9 +24,6 @@ const HOST = { command: process.execPath, args: [HOST_SCRIPT] };
 
 const quietLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 
-function tempDir(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
-}
 
 function writeMission(workspace: string, allowRemoteWrite = false, driver?: string): void {
   writeFileSync(

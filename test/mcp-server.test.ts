@@ -6,8 +6,12 @@
  * registra una propuesta y qué pasa cuando la evidencia no existe.
  */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+
+afterEach(cleanupTempDirs);
+import { cleanupTempDirs, tempDir } from './support/temp.js';
+import { writeFileSync, existsSync, readFileSync } from 'node:fs';
+
+
 import { join } from 'node:path';
 import { buildMissionTools, handleMessage, resolveWorkspaceDir } from '../src/plugin/mcp-server.js';
 import { findMissionFileUpwards, locateMission } from '../src/plugin/mission-locator.js';
@@ -16,9 +20,6 @@ import type { Logger } from '../src/ports.js';
 
 const quietLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 
-function tempDir(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
-}
 
 function writeMission(workspace: string, missionId = 'prueba-mcp'): void {
   writeFileSync(

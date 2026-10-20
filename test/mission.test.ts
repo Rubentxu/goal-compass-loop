@@ -7,16 +7,13 @@
  * ya estaba, y que dos proyectos con el mismo identificador se digan en vez
  * de pisarse en silencio.
  */
-import { describe, expect, it } from 'vitest';
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, expect, it, afterEach } from 'vitest';
+import { cleanupTempDirs, tempDir } from './support/temp.js';
+
+afterEach(cleanupTempDirs);
+import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+
+
 import { join } from 'node:path';
 import {
   declareMission,
@@ -33,9 +30,6 @@ import type { Logger } from '../src/ports.js';
 
 const quietLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 
-function tempDir(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
-}
 
 describe('el identificador de una mision', () => {
   it('sale del nombre del proyecto y de su ruta', () => {

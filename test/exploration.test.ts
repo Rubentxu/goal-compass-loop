@@ -1,13 +1,17 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, expect, it, afterEach } from 'vitest';
+import { cleanupTempDirs, tempDir } from './support/temp.js';
+
+afterEach(cleanupTempDirs);
+import { mkdirSync, writeFileSync } from 'node:fs';
+
+
 import { join } from 'node:path';
 import { SessionExploration } from '../src/adapters/exploration.js';
 import { aMission } from './support/harness.js';
 import type { TextSession } from '../src/ports.js';
 
 function workspaceWithFile(name: string): string {
-  const root = mkdtempSync(join(tmpdir(), 'gcl-expl-'));
+  const root = tempDir('gcl-expl-');
   mkdirSync(join(root, 'src'), { recursive: true });
   writeFileSync(join(root, name), 'contenido');
   return root;
