@@ -4,9 +4,13 @@
  * El fichero de mision describe la intencion durable y los limites; el journal
  * (fuera del repo) describe el estado de ejecucion. Este modulo solo lee.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
 import type { Candidate, Driver, Mission } from '../core/types.js';
+
+/** Nombre del fichero donde se declara la misión. */
+export const MISSION_FILE_NAME = 'goal-compass.json';
 
 export interface MissionConfig {
   missionId: string;
@@ -120,6 +124,176 @@ export function loadMissionConfig(
     ...(c.driver === 'supervisor' || c.driver === 'plugin' ? { driver: c.driver } : {}),
     backlog: backlogRaw.map(parseCandidate),
   };
+}
+
+/** Lo que hay que saber para escribir una declaracion de mision. */
+export interface DeclarationOptions {
+  missionId: string;
+  objective: string;
+  driver: Driver;
+  defaultTokenBudget: number;
+  totalTokenBudget: number | null;
+  allowRemoteWrite: boolean;
+}
+
+/**
+ * El identificador por defecto de una mision.
+ *
+ * Se compone del nombre del proyecto y una huella corta de su ruta. El
+ * nombre lo hace legible y la huella evita que dos proyectos con el mismo
+ * nombre compartan el mismo estado durable, que es un fallo silencioso: las
+ * dos misiones se pisarian sin dar error.
+ */
+export function defaultMissionId(workspace: string): string {
+  const absolute = resolve(workspace);
+  const slug =
+    basename(absolute)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32) || 'mision';
+  const fingerprint = createHash('sha256').update(absolute).digest('hex').slice(0, 4);
+  return `${slug}-${fingerprint}`;
+}
+
+/**
+ * Escribe la declaracion de una mision.
+ *
+ * No pisa una declaracion que ya existe: un fichero de mision escrito a mano
+ * vale mas que uno generado, y pisarlo seria una perdida silenciosa.
+ */
+export function writeMissionDeclaration(path: string, options: DeclarationOptions): void {
+  if (existsSync(path)) {
+    throw new Error(`ya hay una declaracion de mision en ${path}: no se toca`);
+  }
+
+  const declaration = {
+    missionId: options.missionId,
+    objective: options.objective,
+    defaultTokenBudget: options.defaultTokenBudget,
+    totalTokenBudget: options.totalTokenBudget,
+    explorationEnabled: true,
+    allowRemoteWrite: options.allowRemoteWrite,
+    driver: options.driver,
+    backlog: [],
+  };
+
+  writeFileSync(path, `${JSON.stringify(declaration, null, 2)}\n`, 'utf8');
+}
+
+/**
+ * Donde vive la declaracion de la mision de un workspace.
+ */
+export function missionDeclarationPath(workspace: string): string {
+  return resolve(workspace, MISSION_FILE_NAME);
+}
+
+/** Lo que se puede pedir al declarar una mision. */
+export interface DeclareMissionOptions {
+  /** Identificador con el que se quiere llamar a la mision. */
+  missionId?: string | undefined;
+  /** Que se quiere conseguir con ella. */
+  objective: string;
+  /** Que camino la conduce. */
+  driver?: Driver | undefined;
+  /** Tokens por objetivo. */
+  defaultTokenBudget?: number | undefined;
+  /** Tokens para la mision completa. */
+  totalTokenBudget?: number | null | undefined;
+  /** Si la mision autoriza publicar. */
+  allowRemoteWrite?: boolean | undefined;
+}
+
+/** Como queda una mision declarada. */
+export interface DeclaredMission {
+  /** Donde esta la declaracion. */
+  path: string;
+  /** Identificador de la mision. */
+  missionId: string;
+  /** Objetivo declarado. */
+  objective: string;
+  /** Camino que conduce la mision. */
+  driver: Driver;
+  /** Si la declaracion se ha escrito ahora o ya estaba ahi. */
+  created: boolean;
+}
+
+/**
+ * Declara la mision de un workspace.
+ *
+ * Es idempotente: si ya hay una declaracion, no la toca y devuelve la que
+ * hay. Un agente que la declara dos veces por error no rompe nada, y una
+ * declaracion escrita a mano nunca se pierde por detrás de la herramienta.
+ */
+export function declareMission(
+  workspace: string,
+  options: DeclareMissionOptions,
+): DeclaredMission {
+  const root = resolve(workspace);
+  const path = missionDeclarationPath(root);
+
+  if (existsSync(path)) {
+    const current = readDeclaration(path);
+    return { path, ...current, created: false };
+  }
+
+  const missionId = options.missionId ?? defaultMissionId(root);
+  const driver = options.driver ?? 'plugin';
+  const objective = options.objective.trim();
+
+  writeMissionDeclaration(path, {
+    missionId,
+    objective,
+    driver,
+    defaultTokenBudget: options.defaultTokenBudget ?? DEFAULT_TOKEN_BUDGET,
+    totalTokenBudget: options.totalTokenBudget ?? null,
+    allowRemoteWrite: options.allowRemoteWrite === true,
+  });
+
+  return { path, missionId, objective, driver, created: true };
+}
+
+/**
+ * Lee lo esencial de una declaracion sin exigir que sea completa.
+ *
+ * Una declaracion a medio hacer tiene que poder leerse: el objetivo es
+ * decir que hay una mision ahi y como se llama, no validar el resto.
+ */
+export function readDeclaration(path: string): {
+  missionId: string;
+  objective: string;
+  driver: Driver;
+} {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return { missionId: '', objective: '', driver: 'plugin' };
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return { missionId: '', objective: '', driver: 'plugin' };
+  }
+  const c = raw as Record<string, unknown>;
+  return {
+    missionId: typeof c.missionId === 'string' ? c.missionId : '',
+    objective: typeof c.objective === 'string' ? c.objective : '',
+    driver: c.driver === 'supervisor' ? 'supervisor' : 'plugin',
+  };
+}
+
+/**
+ * Si dos rutas apuntan al mismo sitio.
+ *
+ * Las rutas se comparan ya resueltas: un enlace simbolico y su destino son el
+ * mismo directorio, y cada quien da el que conoce.
+ */
+export function sameWorkspace(a: string, b: string): boolean {
+  if (resolve(a) === resolve(b)) return true;
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
 }
 
 /** Convierte la configuracion en el estado de mision inicial. */

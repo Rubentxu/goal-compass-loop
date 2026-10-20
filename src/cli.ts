@@ -15,7 +15,7 @@ import { parseArgs } from 'node:util';
 import { AcpGoalAdapter } from './adapters/acp-goal.js';
 import { FileControlPort } from './adapters/control.js';
 import { FileJournal, journalPath } from './adapters/journal.js';
-import { loadMissionConfig } from './adapters/mission.js';
+import { declareMission, loadMissionConfig } from './adapters/mission.js';
 import { openMission, ensureMissionState } from './runtime.js';
 import { loadTree, validateTree } from './adapters/tree.js';
 import { ensureWorkdir, treeDirFor } from './adapters/workdir.js';
@@ -35,8 +35,12 @@ const logger = {
 
 type Options = Record<string, unknown>;
 
+/** Objetivo que se declara cuando el usuario no dice cual quiere. */
+const DEFAULT_OBJECTIVE = 'Mejorar este proyecto paso a paso, con evidencia en cada paso';
+
 const USAGE = `Goal Compass Loop · supervisor de Goals nativos
 
+  goal-compass declare --workspace <dir>            declara la mision de un proyecto
   goal-compass init   --config <mission.json>     prepara el estado durable de la mision
   goal-compass run    --config <mission.json>     arranca el bucle supervisor
   goal-compass status --mission <mission-id>      muestra el estado de la mision
@@ -45,6 +49,9 @@ const USAGE = `Goal Compass Loop · supervisor de Goals nativos
   goal-compass tree   --workspace <dir>           prepara el arbol del proyecto y lo valida
   goal-compass install-skill                       instala la skill goal-compass
   goal-compass install-plugin                      ensambla el plugin de MCode
+
+  declare admite ademas: --mission-id <id> --objective <texto> --driver supervisor|plugin
+                         --budget <tokens> --total-budget <tokens> --allow-remote-write
 `;
 
 function parse(argv: string[]): { values: Options; positionals: string[] } {
@@ -54,7 +61,13 @@ function parse(argv: string[]): { values: Options; positionals: string[] } {
     options: {
       config: { type: 'string' },
       mission: { type: 'string' },
+      'mission-id': { type: 'string' },
       workspace: { type: 'string' },
+      objective: { type: 'string' },
+      driver: { type: 'string' },
+      budget: { type: 'string' },
+      'total-budget': { type: 'string' },
+      'allow-remote-write': { type: 'boolean' },
       'poll-ms': { type: 'string' },
       'max-iterations': { type: 'string' },
       help: { type: 'boolean' },
@@ -83,6 +96,64 @@ function optionalNumber(values: Options, name: string): number | undefined {
 }
 
 // ------------------------------------------------------------------ comandos
+
+/**
+ * Declara la mision de un proyecto.
+ *
+ * Es la puerta que se abre desde un prompt: deja el proyecto con su
+ * declaracion y su directorio de trabajo, y dice que camino la conduce.
+ *
+ * No pisa una declaracion que ya este. Preparar la mision dos veces no puede
+ * perder el trabajo de quien la escribio a mano, y la segunda vez dice que
+ * hay ahi en vez de dejar un error incomprensible.
+ */
+async function cmdDeclare(values: Options): Promise<void> {
+  const workspace = resolve(
+    typeof values.workspace === 'string' ? values.workspace : process.cwd(),
+  );
+
+  const workdir = ensureWorkdir(workspace);
+  logger.info(
+    `directorio de trabajo: ${workdir.path}` +
+      (workdir.created ? ' (creado)' : '') +
+      (workdir.gitignoreAdded ? ' (anadido a .gitignore)' : ''),
+  );
+
+  const driver =
+    values.driver === 'supervisor' || values.driver === 'plugin' ? values.driver : undefined;
+
+  const declared = declareMission(workspace, {
+    ...(typeof values['mission-id'] === 'string' ? { missionId: values['mission-id'] } : {}),
+    objective:
+      typeof values.objective === 'string' && values.objective.trim() !== ''
+        ? values.objective
+        : DEFAULT_OBJECTIVE,
+    ...(driver ? { driver } : {}),
+    ...(optionalNumber(values, 'budget') !== undefined
+      ? { defaultTokenBudget: optionalNumber(values, 'budget')! }
+      : {}),
+    ...(optionalNumber(values, 'total-budget') !== undefined
+      ? { totalTokenBudget: optionalNumber(values, 'total-budget')! }
+      : {}),
+    ...(values['allow-remote-write'] === true ? { allowRemoteWrite: true } : {}),
+  });
+
+  logger.info(
+    declared.created
+      ? `mision declarada en ${declared.path}`
+      : `ya habia una mision declarada en ${declared.path}: no se toca`,
+  );
+
+  // Releer lo escrito es la unica forma de saber que lo que hay en disco se
+  // puede leer de verdad y no solo parecer bueno.
+  const config = loadMissionConfig(declared.path, { workspace });
+  logger.info(`mision: ${config.missionId}`);
+  logger.info(`objetivo: ${config.objective}`);
+  logger.info(`conduce: ${config.driver ?? 'plugin'}`);
+  logger.info(`estado durable: ${journalPath(config.missionId)}`);
+  console.log('');
+  console.log('abre una sesion en el proyecto y pide: "continua la mision de este repositorio".');
+}
 
 async function cmdInit(values: Options): Promise<void> {
   const configPath = requireString(values, 'config', '--config <mission.json>');
@@ -290,6 +361,7 @@ function resolveProjectRoot(): string {
 }
 
 const COMMANDS: Record<string, (values: Options) => Promise<void>> = {
+  declare: cmdDeclare,
   init: cmdInit,
   run: cmdRun,
   status: cmdStatus,

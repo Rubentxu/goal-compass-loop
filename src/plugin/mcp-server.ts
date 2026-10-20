@@ -18,7 +18,8 @@ import { FileControlPort } from '../adapters/control.js';
 import { FileJournal } from '../adapters/journal.js';
 import { ComposedCandidatePort } from '../adapters/candidates.js';
 import { buildCandidatePorts } from '../runtime.js';
-import { toMission } from '../adapters/mission.js';
+import { toMission, declareMission } from '../adapters/mission.js';
+import { ensureWorkdir } from '../adapters/workdir.js';
 import {
   evidenceExists,
   proposalsToCandidates,
@@ -53,12 +54,76 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
 
   const withoutMission = (): string =>
     'No hay ninguna misión declarada en este workspace. ' +
-    'Crea un fichero goal-compass.json en la raíz del repositorio con ' +
-    'missionId, objective y backlog.\n' +
+    'Declárala con la herramienta mission_declare: necesita un objetivo y se ' +
+    'encarga del resto. Si la herramienta no está disponible, crea un fichero ' +
+    'goal-compass.json en la raíz del repositorio con missionId, objective y ' +
+    'backlog.\n' +
     `Buscando en: ${options.cwd}\n` +
     `Entorno: ${describeEnvironment()}`;
 
   return [
+    {
+      name: 'mission_declare',
+      description:
+        'Declara la misión de este proyecto: escribe el fichero de declaración ' +
+        'con su identificador y su objetivo, y deja preparado el directorio de ' +
+        'trabajo. Si ya hay una declaración no la toca y devuelve la que hay. ' +
+        'Es el primer paso para que la cadena de objetivos arranque en esta sesión.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          objective: { type: 'string', description: 'Qué se quiere conseguir con la misión.' },
+          missionId: {
+            type: 'string',
+            description:
+              'Identificador de la misión. Si no se dice, se deriva del nombre y ' +
+              'la ruta del proyecto para que dos proyectos no compartan estado.',
+          },
+          driver: {
+            type: 'string',
+            enum: ['supervisor', 'plugin'],
+            description: 'Qué camino conduce la misión. Por defecto, el que encadena desde la sesión.',
+          },
+        },
+        required: ['objective'],
+      },
+      async run(args): Promise<string> {
+        const objective = String(args.objective ?? '').trim();
+        if (!objective) {
+          return (
+            'Falta el objetivo de la misión. Sin objetivo no hay forma de saber ' +
+            'qué trabajo encadenar.'
+          );
+        }
+
+        const driver = args.driver === 'supervisor' ? 'supervisor' : undefined;
+        const declared = declareMission(options.cwd, {
+          objective,
+          ...(typeof args.missionId === 'string' && args.missionId.trim() !== ''
+            ? { missionId: args.missionId.trim() }
+            : {}),
+          ...(driver ? { driver } : {}),
+        });
+
+        const workdir = ensureWorkdir(options.cwd);
+
+        const lines = [
+          declared.created
+            ? `Misión declarada: ${declared.missionId}`
+            : `Ya había una misión declarada: ${declared.missionId} (no se ha tocado)`,
+          `Objetivo: ${declared.objective}`,
+          `Declaración: ${declared.path}`,
+          `Directorio de trabajo: ${workdir.path}`,
+          `Conduce: ${declared.driver}`,
+        ];
+        lines.push(
+          declared.created
+            ? 'La cadena de objetivos arrancará en el próximo cierre de turno.'
+            : 'La cadena de objetivos sigue como estaba.',
+        );
+        return lines.join('\n');
+      },
+    },
     {
       name: 'mission_status',
       description:

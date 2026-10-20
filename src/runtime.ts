@@ -6,10 +6,11 @@
  * puntual que encadena el siguiente objetivo cuando el agente termina su
  * turno. Las dos comparten exactamente el mismo cableado.
  */
+import { basename } from 'node:path';
 import { AcpGoalAdapter } from './adapters/acp-goal.js';
 import { FileControlPort } from './adapters/control.js';
 import { FileJournal } from './adapters/journal.js';
-import { loadMissionConfig, toMission, type MissionConfig } from './adapters/mission.js';
+import { loadMissionConfig, sameWorkspace, toMission, type MissionConfig } from './adapters/mission.js';
 import {
   ComposedCandidatePort,
   MissionConfigCandidatePort,
@@ -129,6 +130,18 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
   const existing = await journal.load();
   const mission = existing?.mission ?? toMission(config);
 
+  // El estado durable vive fuera del repositorio, en una carpeta que se nombra
+  // con el identificador de la mision. Dos proyectos que compartan
+  // identificador se pisarian en silencio y cada uno creeria que esta solo.
+  // Antes de tocar nada se comprueba que el estado que ya hay es de este
+  // proyecto; si es de otro, esta mision no conduce y dice por que.
+  const foreign = existing?.mission.workspace;
+  const conflict =
+    foreign && !sameWorkspace(foreign, config.workspace)
+      ? `la mision "${config.missionId}" ya tiene estado del proyecto ` +
+        `"${basename(foreign)}": declara esa mision con otro identificador`
+      : undefined;
+
   // El mando decide si este camino puede actuar. Sin declaracion, lo toma el
   // primero que llegue; con declaracion, manda lo declarado.
   const driving = decideDriving({
@@ -172,13 +185,14 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
   // El camino que no conduce se aparta entero: no abre el host, no escribe en
   // el journal y no deja el estado a medias. Apartarse no puede consistir en
   // dejar a medias lo que va a trabajar otro camino.
-  if (!driving.drive) {
+  if (!driving.drive || conflict) {
+    const reason = conflict ?? driving.reason;
     return {
       supervisor,
       adapter,
       journal,
       driving: false,
-      ...(driving.reason !== undefined ? { reason: driving.reason } : {}),
+      ...(reason !== undefined ? { reason } : {}),
     };
   }
 
