@@ -279,12 +279,12 @@ src/
   ports.ts       interfaces de efectos (objetivo, journal, candidatos, exploración…)
   adapters/      acp-transport.ts · acp-goal.ts · journal.ts · control.ts
                  candidates.ts · discovery.ts · exploration.ts · mission.ts
-                 proposals.ts
+                 proposals.ts · ownership.ts · tree.ts · yaml.ts · workdir.ts
   runtime.ts     montaje de una misión: adaptadores + supervisor
   supervisor.ts  el bucle: observar → decidir → ejecutar → persistir
   plugin/        hook de continuación, servidor de herramientas y ensamblado
   cli.ts         interfaz de línea de comandos
-skill/goal-compass/   Skill instalable con el grafo de 12 nodos
+skill/goal-compass/   Skill instalable con el arbol de 13 nodos (markdown + cabecera YAML)
 plugin/                Paquete del plugin de MCode (manifiesto, hook, MCP, icono)
 spikes/                arnés + escenarios de aceptación contra el host real
 test/                  pruebas permanentes y arnés compartido
@@ -301,10 +301,43 @@ El núcleo no importa nada de los adaptadores. `decide()` no lee ficheros, no
 llama a la red y no conoce el reloj: recibe un `Snapshot` y devuelve una
 `Decision`.
 
+## El árbol de decisión
+
+La skill que instala el plugin trae un **árbol de decisión**: trece nodos que
+dicen, según la señal del momento, qué toca hacer. Cada nodo es un markdown con
+una **cabecera YAML** y el prompt debajo:
+
+```yaml
+---
+id: implement
+role: agent          # quién ejecuta el nodo: agent o supervisor
+links:
+  - to: verify
+    rel: next        # next | recover | complete | escalate | discover | await
+    when: cambio aplicado                # la señal que activa esta salida
+    evidence: comando de prueba preciso  # lo que la sostiene
+---
+```
+
+La topología vive en la cabecera, no en la prosa: así se puede **validar**
+(`npm test` lo comprueba: que todo enlace apunte a un nodo real, que todo nodo
+se alcance desde la entrada y que todo nodo tenga salida) y se puede
+**sustituir por proyecto**.
+
+Para que un proyecto tenga su propio árbol:
+
+```bash
+node dist/cli.js tree --workspace /ruta/al/proyecto
+```
+
+Eso deja el directorio de trabajo `.goal-compass/` en su sitio —con su entrada
+en `.gitignore`, para no ensuciar el `git status`— y dice qué árbol se está
+siguiendo: el del proyecto si tiene el suyo, el de la skill si no.
+
 ## Pruebas
 
 ```bash
-npm test          # 95 pruebas permanentes
+npm test          # pruebas permanentes
 npm run uat       # escenarios contra el host real, con recibos
 npm run typecheck
 ```

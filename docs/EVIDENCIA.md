@@ -720,29 +720,30 @@ Los cinco escenarios, con sus comprobaciones:
 
 | Escenario | Comprobaciones | Resultado |
 |---|---|---|
-| `chain` | 12 | Tres objetivos encadenados sin intervención; el del medio llega por el canal de propuestas y se encadena en su momento; 102 105 tokens medidos |
+| `chain` | 12 | Tres objetivos encadenados sin intervención; el del medio llega por el canal de propuestas y se encadena en su momento; 114 361 tokens medidos |
 | `recovery` | 4 | Un fallo entre crear y confirmar se reconcilia sin duplicar |
 | `pause` | 3 | La orden de pausa detiene el trabajo en curso y la de continuar lo reanuda |
-| `budget` | 3 | Agotado el presupuesto (87 570 tokens), la cadena se detiene sin crear otro objetivo |
+| `budget` | 3 | Agotado el presupuesto (65 460 tokens), la cadena se detiene sin crear otro objetivo |
 | `exploration` | 6 | Sin backlog ni pendientes marcados, el sistema pide buscar trabajo, encuentra trabajo real y lo encadena, con evidencia que señala a ficheros que existen, y sin encadenar el mismo trabajo dos veces |
 
-La última ejecución es la del ciclo de la conduccion unica (seccion 7), que
-anadio dos comprobaciones al escenario de exploracion: que lo encadenara el
-supervisor y que el trabajo no se encadenara dos veces.
+La última ejecución es la del ciclo del árbol como dato (sección 8), con las
+mismas 28 comprobaciones del ciclo anterior: el árbol con cabecera YAML no
+toca al supervisor, y el escenario de exploración sigue midiendo lo que
+midía.
 
 La cadena, con el trabajo del medio llegando por el canal de propuestas:
 
 ```text
-[2026-10-20T04:25:01.272Z] decision: create - trabajo pendiente de la cadena
-[2026-10-20T04:25:01.282Z] intencion persistida: primero -> e031336b-f4c7-4a2a-9d69-af811d4e2671
-[2026-10-20T04:25:01.389Z] goal creado y confirmado: tg_ddbwd4dfs7mvg6jc6e (active)
-[2026-10-20T04:27:19.525Z] goal completado registrado: tg_ddbwd4dfs7mvg6jc6e (complete(verifier_met))
-[2026-10-20T04:27:19.532Z] decision: create - propuesto durante la sesion
-[2026-10-20T04:27:19.541Z] intencion persistida: propuesta:Escribe un fichero llamado resultado-2.txt ...
-[2026-10-20T04:27:19.620Z] goal creado y confirmado: tg_ijkwimrygzmvg6mauz (active)
-[2026-10-20T04:29:28.839Z] decision: create - trabajo pendiente de la cadena
-[2026-10-20T04:29:28.861Z] intencion persistida: tercero -> 42cdcb55-d133-4004-a6b2-abf31b552c6e
-[2026-10-20T04:29:29.043Z] goal creado y confirmado: tg_bt4yhaen1rmvg6p2n4 (active)
+[2026-10-20T08:31:05.190Z] decision: create - trabajo pendiente de la cadena
+[2026-10-20T08:31:05.202Z] intencion persistida: primero -> c079122d-e135-4592-bbfd-046584a44bf2
+[2026-10-20T08:31:05.343Z] goal creado y confirmado: tg_kkf9h79bx2mvgfbs3c (active)
+[2026-10-20T08:33:50.493Z] goal completado registrado: tg_kkf9h79bx2mvgfbs3c (complete(verifier_met))
+[2026-10-20T08:33:50.501Z] decision: create - propuesto durante la sesion
+[2026-10-20T08:33:50.510Z] intencion persistida: propuesta:Escribe un fichero llamado resultado-2.txt ...
+[2026-10-20T08:33:50.559Z] goal creado y confirmado: tg_icgk7hj1pjmvgffbn6 (active)
+[2026-10-20T08:36:41.725Z] decision: create - trabajo pendiente de la cadena
+[2026-10-20T08:36:41.735Z] intencion persistida: tercero -> 7c6cc171-b832-4842-a44a-8d97177c3484
+[2026-10-20T08:36:41.784Z] goal creado y confirmado: tg_p2ra05qvxnmvgfizre (active)
 ```
 
 El orden lo decide la prioridad, no el orden de la lista: el backlog declarado
@@ -751,7 +752,7 @@ propuesta no se queda para el final ni se salta.
 
 Y el escenario de exploración, que ya no puede dar por hecho que el trabajo
 llega por la exploración, porque con el plugin instalado el agente puede
-usar la herramienta de propuestas. En el ciclo de la conduccion unica el
+usar la herramienta de propuestas. En la ultima ejecucion el
 trabajo llego por la exploracion y lo encadeno el supervisor; el recibo
 completo esta en la seccion 7:
 
@@ -760,7 +761,7 @@ PASA · se encadeno un Goal sin trabajo marcado (origen: exploracion)
 PASA · el sistema pidio buscar trabajo
 PASA · el Goal viene de una fuente que investigo (exploracion)
 PASA · su evidencia senala a un fichero real (NOTAS.md, src/fechas.ts)
-PASA · el supervisor encadeno el objetivo (tg_o4ric84264mvg6ysq8)
+PASA · el supervisor encadeno el objetivo (tg_tokff996m5mvgfshkd)
 PASA · no se encadeno el mismo trabajo dos veces (1)
 ```
 
@@ -768,13 +769,11 @@ Fragmento literal del escenario de exploración, que es el que ejercita la
 búsqueda de trabajo con el modelo:
 
 ```text
-[2026-10-20T04:36:00.433Z] sin trabajo elegible: se pide una exploracion acotada del workspace
-[2026-10-20T04:36:59.555Z] la exploracion aporto 2 candidato(s): la mision continua
-[2026-10-20T04:37:02.559Z] decision: create - NOTAS.md pide expresamente "cubrirla con una
-                prueba" y el repositorio no contiene ningún fichero de prueba ni runner
-                configurado (solo existen goal-compass.json, NOTAS.md y src/fechas.ts), así
-                que a día de hoy no hay ninguna forma de comprobar que la implementación de
-                la tarea 0 funciona o deja de lanzar la excepción.
+[2026-10-20T08:42:47.375Z] sin trabajo elegible: se pide una exploracion acotada del workspace
+[2026-10-20T08:44:00.106Z] la exploracion aporto 2 candidato(s): la mision continua
+[2026-10-20T08:44:04.701Z] decision: create - NOTAS.md pide explícitamente 'cubrirla con una prueba' y no existe
+                ningún fichero de test en el repo. Sin ella, la implementación queda sin red de
+                seguridad y una regresión futura en la salida de `exportar()` pasaría inadvertida.
 ```
 
 Ese texto no lo escribió el sistema: lo escribió **el modelo**, leyendo el
@@ -926,7 +925,7 @@ Los cinco escenarios, con sus comprobaciones:
 | `recovery` | 4 | Un fallo entre crear y confirmar se reconcilia sin duplicar |
 | `pause` | 3 | La orden de pausa detiene el trabajo en curso y la de continuar lo reanuda |
 | `budget` | 3 | Agotado el presupuesto (87 570 tokens), la cadena se detiene sin crear otro objetivo |
-| `exploration` | 6 | Sin backlog ni pendientes marcados, el sistema pide buscar trabajo, encuentra trabajo real y **lo encadena el supervisor**, con evidencia que señala a ficheros que existen, y sin encadenar el mismo trabajo dos veces |
+| `exploration` | 6 | Sin backlog ni pendientes marcados, el sistema pide buscar trabajo, encuentra trabajo real y lo encadena el supervisor, con evidencia que señala a ficheros que existen, y sin encadenar el mismo trabajo dos veces |
 
 El escenario que cerraba el hueco:
 
@@ -957,6 +956,7 @@ Y la exploración, que es la única fuente de trabajo que no viene de una lista
 escrita a mano, sigue siendo la que decide:
 
 ```text
+[2026-10-20T04:36:00.433Z] sin trabajo elegible: se pide una exploracion acotada del workspace
 [2026-10-20T04:36:59.555Z] la exploracion aporto 2 candidato(s): la mision continua
 [2026-10-20T04:37:02.559Z] decision: create - NOTAS.md pide expresamente "cubrirla con una
                 prueba" y el repositorio no contiene ningún fichero de prueba ni runner
@@ -975,7 +975,172 @@ lo que ve en el workspace y nombra **`goal-compass.json`**. Antes, el fichero
 de la declaración se llamaba `mission.json` y el plugin no lo encontraba: la
 vía que se aparta era una vía que no existía.
 
-## 8 · Lo que NO se ha ejecutado
+## 8 · El árbol como dato, y la cadena que no se apaga — **PASADO**
+
+### 8.1 Lo que se encontró, con la fuente primaria
+
+El núcleo puro de la decisión (`src/core/decide.ts`) dice tres cosas que
+importan, y se leyeron ahí, no de memoria:
+
+```text
+decide.ts:100   mission.maxGoals !== null && goalsCreated >= maxGoals   -> park
+decide.ts:107   tokensUsedTotal >= totalTokenBudget                     -> park
+decide.ts:118   eligible.length === 0                                    -> park
+decide.ts:221   compareCandidates: prioridad, riesgo, coste, identificador
+decide.ts:139   reason: best.whyNow || `candidato elegido por prioridad`
+```
+
+El `whyNow` es texto: **no influye en la elección**. Y el hook del plugin
+pasa `exploration: false` (`src/plugin/auto-continue.ts`), porque preguntar al
+modelo se come el tiempo del turno.
+
+De ahí sale el hueco: **en la vía del plugin la cadena no se autoalimenta**. Si
+el backlog se vacía y nadie propone nada, el hook no encuentra trabajo, el turno
+se acaba y la cadena muere con la misión todavía viva. Además, el objetivo que
+arranca no llevaba nada del contexto del proyecto: el agente volvía a deducirlo
+desde cero en cada turno.
+
+### 8.2 El árbol, que era prosa, ahora es dato
+
+La topología del grafo vivía escrita a mano en el texto de cada markdown. Eso
+no se puede validar con sentido ni sustituir por proyecto.
+
+Ahora cada nodo es un markdown con cabecera YAML, y la cabecera es la fuente de
+la topología:
+
+```yaml
+---
+id: implement
+role: agent
+links:
+  - to: verify
+    rel: next
+    when: cambio aplicado
+    evidence: comando de prueba preciso
+---
+```
+
+La migración movió **66 enlaces** de 13 ficheros, sin perder ninguno: el
+script que la hizo leyó los enlaces del markdown y los escribió en la cabecera.
+
+Y como la topología es dato, la suite la comprueba con el mismo cargador que
+usa el producto:
+
+```text
+$ npx vitest run test/skill-graph.test.ts
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+```
+
+Lo que se comprueba del árbol que **se instala**:
+
+- todo enlace apunta a un nodo que existe;
+- todo nodo se alcanza desde la entrada;
+- todo nodo tiene salida (el agente no se queda atascado);
+- todo nodo tiene una forma que el agente puede usar, con sus secciones y sus
+  preguntas;
+- un nodo de control (`role: supervisor`) solo se entra por `discover` o
+  `await`.
+
+### 8.3 El lector de YAML, sin dependencias
+
+El proyecto no tiene dependencias en ejecución, y un lector completo de YAML es
+una biblioteca entera. `src/adapters/yaml.ts` es un lector de un subconjunto
+acotado: mapas, listas, escalares, comillas, comentarios y texto de bloque. Lo
+que no admite —anclas, etiquetas, colecciones en linea, documentos multiples—
+se rechaza con un error claro, en vez de adivinarse:
+
+```text
+yaml: linea 6: no se entiende la linea: rel:inventado
+```
+
+Y el error dice la línea, que es lo que hace falta para arreglarlo.
+
+### 8.4 La respuesta de continuación, con contexto
+
+El prompt que el hook entrega al agente al encadenar un objetivo no decía nada
+del proyecto. Ahora dice dónde está la misión en ese momento:
+
+```text
+Contexto de la mision "mejora-continua":
+- estado: running
+- objetivos completados: 3; el ultimo fue "Cubrir exportar() con una prueba real"
+- presupuesto: 102105 token(s) de 500000
+- trabajo declarado pendiente: 2 candidato(s)
+```
+
+Y, sobre todo, **pide dejar el trabajo siguiente**. Eso es lo que cierra el
+bucle: la cadena se alimenta de la continuidad del propio trabajo, no de una
+lista escrita a mano.
+
+```text
+Cuando termines, deja el trabajo siguiente: con mission_propose, la evidencia
+que lo respalda y como se sabra que esta hecho. Si de verdad no hay trabajo
+que quede, dilo con claridad en vez de inventarlo. La cadena sigue mientras
+alguien deje trabajo.
+```
+
+### 8.5 El directorio de trabajo, y que no ensucie el repositorio
+
+Un proyecto puede tener su propio árbol en `.goal-compass/`, y ese directorio
+**queda ignorado por git**: es configuración local y no debe ensuciar el
+`git status` de quien está trabajando. El comando
+
+```bash
+node dist/cli.js tree --workspace /tmp/gcl-wd
+```
+
+en un repositorio recién hecho:
+
+```text
+directorio de trabajo: /tmp/gcl-wd/.goal-compass (creado) (anadido a .gitignore)
+ignorado por git: si
+arbol: .../skill/goal-compass/graph (de la skill)
+entrada: index
+nodos: 13 (11 de agente, 2 de control)
+enlaces: 66
+el arbol no tiene problemas
+
+$ git status --porcelain
+?? .gitignore
+```
+
+El directorio de trabajo **no aparece**: lo único que hay en el estado de git es
+el `.gitignore` que el propio comando escribió.
+
+### 8.6 La tormenta de ideas
+
+Las ideas que surieron, con el motivo de integrarse o no, están en
+`docs/IDEAS.md`. Se integraron cinco: el árbol como dato, la metadata con
+dientes, la continuación con contexto, la petición de dejar el trabajo
+siguiente, y el directorio de trabajo ignorado. Se dejaron cuatro fuera, y por
+qué: recordar el nodo en el que se quedó (necesita un contrato nuevo con la
+superficie de herramientas), explorar desde el hook (no cabe en nueve
+segundos), hacer renovable el presupuesto (es el freno del usuario) e
+includes en el árbol (nadie lo ha pedido).
+
+### 8.7 La aceptación, después del cambio
+
+El árbol con cabecera YAML no toca al supervisor, así que la aceptación tiene
+que seguir dando lo mismo. Dio lo mismo:
+
+```text
+=============== RESUMEN ===============
+PASA · chain
+PASA · recovery
+PASA · pause
+PASA · budget
+PASA · exploration
+=======================================
+```
+
+Veintiocho comprobaciones, con las cifras de esta ejecución: la cadena costó
+114 361 tokens en tres objetivos y el freno de gasto se paró en 65 460. El
+escenario de exploración siguió midiendo lo que mide: trabajo real, encontrado
+por el modelo, encadenado por el supervisor, con evidencia que señala a
+ficheros que existen y sin encadenar el mismo trabajo dos veces.
+
+## 9 · Lo que NO se ha ejecutado
 
 - **El plugin no se ha probado en la interfaz gráfica.** La validación se ha
   hecho con `mcode exec`, que es la misma ruta de hooks pero sin pantalla.

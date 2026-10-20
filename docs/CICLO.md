@@ -393,6 +393,100 @@ La lección final: **«un solo escritor» no es una frase sobre ficheros, es una
 frase sobre decisiones**. Y una regla que depende del orden de arranque no es
 una regla, es una suerte.
 
+### 3.14 El árbol como dato, y la cadena que no se apaga
+
+El ciclo anterior dejó el sistema con un solo conductor. Este ciclo le hace dos
+preguntas más: **¿de dónde sale la decisión?** y **¿qué pasa cuando ya no
+queda nada que hacer?**
+
+#### Lo que se encontró, con la fuente primaria
+
+`src/core/decide.ts` es el núcleo puro de la decisión, y dice tres cosas que
+importan:
+
+1. La misión se aparca en cuatro casos: objetivo estancado, `maxGoals`
+   alcanzado, **presupuesto agotado** y **«sin trabajo elegible»**.
+2. El siguiente objetivo se elige con un orden **estático**: prioridad, riesgo,
+   coste e identificador. El `whyNow` del candidato es texto: no influye.
+3. El hook del plugin **no explora** (`exploration: false`): preguntar al
+   modelo se come el tiempo del turno.
+
+De ahí sale el hueco que este ciclo cierra: **en la vía del plugin la cadena no
+se autoalimenta**. Si el backlog se vacía y nadie propone nada, el hook no
+encuentra trabajo, el turno se acaba y la cadena muere con la misión todavía
+vivo. Y el objetivo que arranca no lleva nada del contexto del proyecto: el
+agente vuelve a deducirlo desde cero en cada turno.
+
+#### El árbol pasa a ser dato
+
+La topología del grafo vivía dentro del texto markdown: cada nodo tenía su
+lista de enlaces escrita a mano en la prosa. Eso no se puede validar con
+sentido, ni sustituir por proyecto.
+
+Ahora **cada nodo es un markdown con una cabecera YAML**, y la cabecera es la
+fuente de la topología:
+
+```yaml
+---
+id: implement
+role: agent
+links:
+  - to: verify
+    rel: next
+    when: cambio aplicado
+    evidence: comando de prueba preciso
+---
+```
+
+El cuerpo sigue siendo el prompt. La cabecera dice quién ejecuta el nodo
+(`role`), qué salidas tiene y con qué condición se toma cada una. Y como la
+topología es dato, se puede **comprobar**: que todo enlace apunte a un nodo que
+existe, que todo nodo se alcance desde la entrada, que todo nodo tenga salida y
+que un nodo de control solo se entre por `discover` o `await`.
+
+Para leer YAML sin dependencias, el proyecto lleva su propio lector de un
+subconjunto acotado: `src/adapters/yaml.ts`. Un lector completo sería una
+biblioteca entera; este es lo justo que el árbol necesita, y lo que no admite
+se rechaza con un error claro en vez de adivinarse.
+
+#### La respuesta de continuación lleva el contexto
+
+El prompt que el hook entrega al agente al encadenar un objetivo no decía nada
+del proyecto. Ahora dice dónde está la misión en ese momento: cuántos
+objetivos ha completado, cuál fue el último, cuánto presupuesto queda y cuánto
+trabajo declarado sigue pendiente.
+
+Y sobre todo, **pide dejar el trabajo siguiente**: al terminar, el agente
+propone con `mission_propose` la evidencia de lo que viene y cómo se sabrá que
+está hecho. Eso es lo que cierra el bucle: la cadena se alimenta de la
+continuidad del propio trabajo, no de una lista escrita a mano.
+
+#### El árbol propio del proyecto
+
+Un proyecto puede tener su propio árbol en `.goal-compass/`, un subdirectorio
+de trabajo que **queda ignorado por git**: es configuración local y no debe
+ensuciar el `git status` de quien está trabajando. El comando
+
+```bash
+node dist/cli.js tree --workspace /ruta/al/proyecto
+```
+
+prepara el directorio, asegura su entrada en `.gitignore` y dice qué árbol se
+está siguiendo y si tiene problemas.
+
+#### La lección
+
+**Lo que se decide en un sitio y se aplica en otro, termina siendo dos
+sistemas.** El grafo era un ejemplo: la topología la escribía una persona en
+prosa y la comprobaba otra persona parseando esa prosa. Al pasar la topología
+a la cabecera, la persona sigue escribiendo lo mismo, pero ahora hay un sitio
+único y una comprobación que lo entiende.
+
+Y la segunda: **una cadena que se queda sin trabajo no se apaga, se queda
+muerta en silencio.** Preguntar al modelo cuesta un turno entero y no cabe en
+un hook de nueve segundos; la única forma de que la cadena siga es que quien
+trabaja deje lo que viene. Pedirlo no es una formalidad: es el combustible.
+
 ## 4. Cómo se usa
 
 ### Con el plugin (lo recomendado)
