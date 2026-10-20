@@ -332,8 +332,13 @@ async function cmdInstallPlugin(values: Options): Promise<void> {
   console.log('registralo en MCode con:');
   console.log(`  mcode plugin add ${PLUGIN_NAME} -m local`);
   console.log('');
-  console.log('despues, en el repositorio que quieras encadenar, crea goal-compass.json');
-  console.log('con la declaracion de la mision (missionId, objective y backlog).');
+  console.log('despues, en el repositorio que quieras encadenar, declara la mision:');
+  console.log(
+    `  node ${join(marketplaceDir, PLUGIN_NAME, 'dist', 'cli.js')} declare ` +
+      '--workspace <dir> --objective "<que busca la mision>"',
+  );
+  console.log('');
+  console.log('despues, pide en la sesion: "continua la mision de este repositorio".');
 }
 
 /** Localiza la carpeta de la skill segun como se ejecuto el binario. */
