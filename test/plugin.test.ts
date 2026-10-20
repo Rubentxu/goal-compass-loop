@@ -24,7 +24,7 @@ function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-function writeMission(workspace: string): void {
+function writeMission(workspace: string, allowRemoteWrite = false): void {
   writeFileSync(
     join(workspace, 'goal-compass.json'),
     JSON.stringify(
@@ -32,6 +32,7 @@ function writeMission(workspace: string): void {
         missionId: 'prueba-hook',
         objective: 'Encadenar un objetivo desde el hook',
         defaultTokenBudget: 60000,
+        allowRemoteWrite,
         backlog: [
           {
             candidateId: 'trabajo-1',
@@ -88,6 +89,27 @@ describe('hook de continuacion', () => {
     expect(event?.session_id).toBe('mvs_1');
     expect(parseHookEvent('esto no es json')).toBeNull();
     expect(parseHookEvent('')).toBeNull();
+  });
+
+  it('el limite de publicacion de la mision llega al agente', async () => {
+    const salida = await runAutoContinue(
+      JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }),
+      { host: HOST, logger: quietLogger },
+    );
+    const decision = JSON.parse(salida) as { reason: string };
+    expect(decision.reason).toContain('no autoriza publicar');
+  });
+
+  it('una mision que autoriza publicar lo dice sin dar permiso por su cuenta', async () => {
+    const otro = tempDir('gcl-hook-publica-');
+    writeMission(otro, true);
+    const salida = await runAutoContinue(
+      JSON.stringify({ session_id: 'mvs_fake', cwd: otro }),
+      { host: HOST, logger: quietLogger },
+    );
+    const decision = JSON.parse(salida) as { reason: string };
+    expect(decision.reason).toContain('autoriza publicar');
+    expect(decision.reason).toContain('autorizacion explicita del usuario');
   });
 
   it('no hace nada cuando el workspace no declara una mision', async () => {

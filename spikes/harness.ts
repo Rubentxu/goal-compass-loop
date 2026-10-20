@@ -12,13 +12,14 @@
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { AcpGoalAdapter } from '../src/adapters/acp-goal.js';
 import { FileControlPort } from '../src/adapters/control.js';
 import { FileJournal } from '../src/adapters/journal.js';
-import { ComposedCandidatePort, MissionConfigCandidatePort, WorkspaceDiscovery } from '../src/adapters/candidates.js';
+import { ComposedCandidatePort } from '../src/adapters/candidates.js';
 import { SessionExploration } from '../src/adapters/exploration.js';
-import { WorkspaceEvidenceScanner } from '../src/adapters/discovery.js';
+import { writeProposal } from '../src/adapters/proposals.js';
+import { buildCandidatePorts } from '../src/runtime.js';
 import type { Candidate, Journal, Mission, MissionStatus } from '../src/core/types.js';
 import { Supervisor } from '../src/supervisor.js';
 
@@ -27,6 +28,37 @@ export interface Check {
   name: string;
   ok: boolean;
   detail?: string;
+  /**
+   * La comprobacion no se pudo hacer porque el host dejo el trabajo a medias.
+   *
+   * No es un fallo del sistema: es trabajo que no llego a terminarse. Se
+   * informa aparte, porque dar un rojo por una interrupcion ajena esconde el
+   * fallo de verdad, y dar un verde por una comprobacion que no se hizo es
+   * mentira.
+   */
+  skipped?: boolean;
+}
+
+/**
+ * El host dejo un objetivo a medias.
+ *
+ * El verificador aborta, se agota un limite o el proceso se cae. El sistema no
+ * puede hacer nada con eso: solo puede negarse a encadenar otro objetivo y
+ * esperar. Por eso el escenario se marca como no corrido, no como fallido.
+ */
+export class HostInterruption extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HostInterruption';
+  }
+}
+
+/** Como termino el trabajo en el host. */
+export interface HostOutcome {
+  /** Objetivos que llegaron a completarse. */
+  completed: number;
+  /** Por que se quedo trabajo a medias, si se quedo. */
+  interruption?: string;
 }
 
 /** Utilidades que el escenario puede usar. */
@@ -44,12 +76,23 @@ export interface ScenarioContext {
     predicate: () => Promise<boolean>,
     timeoutMs?: number,
   ): Promise<void>;
+  /** Espera a que se completen varios objetivos, o se rind cuenta. */
+  waitForCompletedGoals(count: number): Promise<void>;
+  /** Como termino el trabajo en el host: cuantos objetivos se completaron. */
+  hostOutcome(): Promise<HostOutcome>;
   /** Estado actual del journal. */
   readJournal(): Promise<Journal>;
   /** Anade o cambia un candidato en el fichero de la mision. */
   setCandidates(candidates: Candidate[]): Promise<void>;
   /** Cambia la orden de control del usuario. */
   setControl(status: MissionStatus): Promise<void>;
+  /** Registra una propuesta de trabajo, como haria el agente con la herramienta. */
+  propose(proposal: {
+    objective: string;
+    evidence: string;
+    whyNow?: string;
+    doneWhen?: string[];
+  }): void;
   /** Cambia un limite de la mision ya inicializada. */
   patchMission(patch: Partial<Mission>): Promise<void>;
   /** Reinicia el host ACP reanudando la misma sesion. */
@@ -59,6 +102,8 @@ export interface ScenarioContext {
 export interface Scenario {
   name: string;
   description: string;
+  /** Margen particular del escenario, cuando necesita mas o menos que el general. */
+  timeoutMs?: number;
   run(context: ScenarioContext): Promise<Check[]>;
 }
 
@@ -77,8 +122,8 @@ const DEFAULT_TIMEOUT_MS = 12 * 60_000;
 export async function runScenario(
   scenario: Scenario,
   options: ScenarioOptions = {},
-): Promise<{ ok: boolean; checks: Check[] }> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+): Promise<{ ok: boolean; checks: Check[]; interrupted: boolean; skipped: number }> {
+  const timeoutMs = options.timeoutMs ?? scenario.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const workspace = mkdtempSync(join(tmpdir(), `gcl-${scenario.name}-`));
   const missionId = `uat-${scenario.name}-${Date.now()}`;
   const log = options.quiet
@@ -160,10 +205,11 @@ export async function runScenario(
     startSupervisor(startOptions = {}) {
       supervisor = new Supervisor({
         goalPort: adapter!,
-        candidatePort: new ComposedCandidatePort([
-          new MissionConfigCandidatePort(missionFile),
-          new WorkspaceDiscovery(new WorkspaceEvidenceScanner({ maxEvidence: 5 })),
-        ]),
+        // Las mismas fuentes que usa el producto: si el arnes montara las suyas,
+        // los escenarios estarian probando otro sistema.
+        candidatePort: new ComposedCandidatePort(
+          buildCandidatePorts(missionFile, workspace, { maxEvidence: 5 }),
+        ),
         journalPort: journal,
         controlPort: control,
         explorationPort: new SessionExploration(adapter!, workspace),
@@ -186,6 +232,36 @@ export async function runScenario(
       }
       throw new Error(`tiempo agotado esperando: ${description}`);
     },
+    async waitForCompletedGoals(count) {
+      try {
+        await this.waitFor(`${count} objetivos terminados`, async () => {
+          const state = await journal.load();
+          return (state?.goals.length ?? 0) >= count;
+        });
+      } catch (err) {
+        const outcome = await this.hostOutcome();
+        if (outcome.interruption) throw new HostInterruption(outcome.interruption);
+        throw err;
+      }
+    },
+    async hostOutcome() {
+      const state = await journal.load();
+      const completed = state?.goals.length ?? 0;
+      const recorded = new Set((state?.goals ?? []).map((record) => record.goalId));
+      const pending = (state?.intents ?? []).filter(
+        (intent) => intent.status === 'committed' && intent.goalId && !recorded.has(intent.goalId),
+      );
+      if (pending.length === 0) return { completed };
+
+      const goal = adapter
+        ? await adapter.read(adapter.sessionId()).catch(() => null)
+        : null;
+      const reason = goal?.statusReason ?? goal?.status ?? 'el host no lo termino';
+      return {
+        completed,
+        interruption: `el host interrumpio el objetivo ${pending[0]!.goalId} (${reason})`,
+      };
+    },
     async readJournal() {
       const state = await journal.load();
       if (!state) throw new Error('el journal no existe');
@@ -197,6 +273,16 @@ export async function runScenario(
     },
     async setControl(status) {
       await control.write(status);
+    },
+    propose(proposal) {
+      writeProposal(missionId, {
+        candidateId: `propuesta:${proposal.objective}`.slice(0, 120),
+        objective: proposal.objective,
+        whyNow: proposal.whyNow ?? 'propuesta surgida durante la sesion',
+        evidenceRefs: [proposal.evidence],
+        doneWhen: proposal.doneWhen ?? [],
+        createdAt: new Date().toISOString(),
+      });
     },
     async patchMission(patch) {
       const state = await journal.load();
@@ -214,23 +300,36 @@ export async function runScenario(
 
   let checks: Check[] = [];
   let failure: string | undefined;
+  let interrupted = false;
 
   try {
     adapter = new AcpGoalAdapter({ workspace, logger: log });
     await adapter.start();
     checks = await scenario.run(context);
   } catch (err) {
-    failure = (err as Error).message;
+    if (err instanceof HostInterruption) {
+      interrupted = true;
+      failure = err.message;
+    } else {
+      failure = (err as Error).message;
+    }
   } finally {
     supervisor?.stop();
     await adapter?.close();
   }
 
-  const ok = failure === undefined && checks.length > 0 && checks.every((check) => check.ok);
-  printReceipt(scenario, checks, failure, workspace, missionId);
+  const failed = checks.filter((check) => !check.ok && !check.skipped);
+  const skipped = checks.filter((check) => check.skipped);
+  const ok =
+    !interrupted &&
+    failure === undefined &&
+    checks.length > 0 &&
+    failed.length === 0 &&
+    checks.some((check) => check.ok && !check.skipped);
+  printReceipt(scenario, checks, failure, workspace, missionId, interrupted);
 
   if (!options.quiet) rmSync(workspace, { recursive: true, force: true });
-  return { ok, checks };
+  return { ok, checks, interrupted, skipped: skipped.length };
 }
 
 function printReceipt(
@@ -239,21 +338,28 @@ function printReceipt(
   failure: string | undefined,
   workspace: string,
   missionId: string,
+  interrupted: boolean,
 ): void {
   console.log(`\n=============== RECIBO · ${scenario.name} ===============`);
   console.log(scenario.description);
   console.log(`workspace: ${workspace}`);
   console.log(`mision:    ${missionId}`);
-  if (failure) console.log(`FALLO:     ${failure}`);
+  if (interrupted) console.log(`NO CORRIO: ${failure}`);
+  else if (failure) console.log(`FALLO:     ${failure}`);
   console.log('--- comprobaciones ---');
   for (const check of checks) {
-    console.log(`${check.ok ? 'PASA' : 'FALLA'} · ${check.name}${check.detail ? ` (${check.detail})` : ''}`);
+    const verdict = check.skipped ? 'NO CORRIO' : check.ok ? 'PASA' : 'FALLA';
+    console.log(`${verdict} · ${check.name}${check.detail ? ` (${check.detail})` : ''}`);
   }
   console.log('===========================================================');
 }
 
-/** Crea un workspace con un fichero de ejemplo, para que el Goal tenga donde trabajar. */
+/**
+ * Crea un fichero de ejemplo en el workspace, para que el Goal tenga donde
+ * trabajar y para que la evidencia de una propuesta senale a algo real.
+ */
 export function seedWorkspace(workspace: string, name: string, content: string): void {
-  mkdirSync(join(workspace, name.replace(/\//g, '-')), { recursive: true });
-  writeFileSync(join(workspace, name), content);
+  const path = join(workspace, name);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
 }

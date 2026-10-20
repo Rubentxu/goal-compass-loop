@@ -15,6 +15,7 @@ import {
   MissionConfigCandidatePort,
   WorkspaceDiscovery,
 } from './adapters/candidates.js';
+import { WorkspaceEvidenceScanner } from './adapters/discovery.js';
 import { SessionExploration } from './adapters/exploration.js';
 import { ProposalCandidatePort } from './adapters/proposals.js';
 import type { Journal } from './core/types.js';
@@ -49,12 +50,30 @@ export interface MissionRuntime {
  * El backlog declarado manda, despues lo que se ha propuesto durante la
  * sesion (ya viene investigada y con su evidencia puesta) y por ultimo las
  * senales automaticas del repositorio.
+ *
+ * La prioridad no la da el orden de la lista, sino la que cada fuente
+ * asigna a sus candidatos: el backlog la fija el usuario, las propuestas
+ * van a medias y las senales del repositorio son lo mas bajo. Un unico
+ * lugar decide de donde sale el trabajo, para que el supervisor y las
+ * pruebas de aceptacion no puedan divergir.
  */
-export function buildCandidatePorts(configPath: string, workspace: string): CandidatePort[] {
+export interface CandidatePortOptions {
+  /** Maximo de senales del workspace que se ofrecen como trabajo. */
+  maxEvidence?: number;
+}
+
+export function buildCandidatePorts(
+  configPath: string,
+  workspace: string,
+  options: CandidatePortOptions = {},
+): CandidatePort[] {
+  const scanner = new WorkspaceEvidenceScanner(
+    options.maxEvidence === undefined ? {} : { maxEvidence: options.maxEvidence },
+  );
   return [
     new MissionConfigCandidatePort(configPath),
     new ProposalCandidatePort(workspace),
-    new WorkspaceDiscovery(),
+    new WorkspaceDiscovery(scanner),
   ];
 }
 
@@ -119,7 +138,8 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
     workspace: config.workspace,
     sessionId: options.sessionId ?? state.sessionId,
     ...(options.host?.command !== undefined ? { command: options.host.command } : {}),
-    ...(options.host?.args !== undefined ? { args: options.host.args } : {}),    logger,
+    ...(options.host?.args !== undefined ? { args: options.host.args } : {}),
+    logger,
     onGoalUpdate: (event) => {
       logger.info(
         `cambio de goal: estado=${event.goal?.status ?? 'sin goal'} ` +
@@ -148,9 +168,4 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
   });
 
   return { supervisor, adapter, journal };
-}
-
-/** Lee la configuracion de una mision desde un fichero. */
-export function readMissionConfig(configPath: string, workspace?: string): MissionConfig {
-  return loadMissionConfig(configPath, workspace ? { workspace } : undefined);
 }

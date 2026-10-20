@@ -107,7 +107,7 @@ export async function runAutoContinue(
       log.info(`objetivo encadenado: ${outcome.created.goalId}`);
       return JSON.stringify({
         decision: 'block',
-        reason: continuePrompt(outcome.created.objective),
+        reason: continuePrompt(outcome.created.objective, mission.config.allowRemoteWrite),
       });
     } catch (err) {
       log.warn(`no se pudo encadenar el objetivo siguiente: ${(err as Error).message}`);
@@ -129,14 +129,24 @@ export async function runAutoContinue(
   return Promise.race([work, guard]);
 }
 
-/** Lo que el agente recibe para seguir trabajando. */
-function continuePrompt(objective: string): string {
+/**
+ * Lo que el agente recibe para seguir trabajando.
+ *
+ * El limite de publicacion de la mision viaja aqui porque el agente es el
+ * unico que puede hacer push, publicar o desplegar: si la mision no lo
+ * autoriza, el agente tiene que saberlo antes de empezar.
+ */
+function continuePrompt(objective: string, allowRemoteWrite: boolean): string {
+  const boundary = allowRemoteWrite
+    ? 'La mision autoriza publicar, pero hace falta autorizacion explicita del usuario.'
+    : 'La mision no autoriza publicar: no hagas push, ni tag, ni release, ni despliegue.';
   return (
     `La mision continua: el objetivo siguiente ya esta creado y activo.\n` +
     `Objetivo: ${objective}\n\n` +
     `Trabaja ese objetivo con la skill goal-compass: empieza por graph/index.md, ` +
     `elige solo el nodo que corresponda y ejecuta una accion pequena y verificable. ` +
-    `Cuando su alcance este probado, cierralo con update_goal(status=complete).`
+    `Cuando su alcance este probado, cierralo con update_goal(status=complete).\n\n` +
+    `Limite de la mision: ${boundary}`
   );
 }
 

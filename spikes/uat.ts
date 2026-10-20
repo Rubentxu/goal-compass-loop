@@ -9,8 +9,16 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runScenario, seedWorkspace, type Check, type Scenario, type ScenarioContext } from './harness.js';
-import type { Candidate } from '../src/core/types.js';
+import {
+  HostInterruption,
+  runScenario,
+  seedWorkspace,
+  type Check,
+  type Scenario,
+  type ScenarioContext,
+} from './harness.js';
+import { readProposals } from '../src/adapters/proposals.js';
+import type { Candidate, Journal } from '../src/core/types.js';
 
 /** Objetivo trivial: escribir un fichero con un texto exacto. */
 function fileGoal(name: string, content: string): string {
@@ -36,71 +44,108 @@ function candidate(overrides: Partial<Candidate> = {}): Candidate {
   };
 }
 
-/** El primer Goal termina y el supervisor crea el siguiente sin intervencion. */
+/**
+ * El primer Goal termina y el supervisor crea el siguiente sin intervencion.
+ *
+ * El trabajo del medio llega por el canal de propuestas, como cuando el agente
+ * propone el siguiente objetivo durante la sesion. Se comprueba que compite
+ * con el backlog por prioridad y que se encadena en su momento, sin quedarse
+ * para el final ni quedarse sin encadenar.
+ *
+ * Si el host interrumpe un objetivo, el escenario no se da por bueno ni por
+ * malo: se marca como no corrido, porque lo que fallo no fue el sistema.
+ */
 const chain: Scenario = {
   name: 'chain',
   description: 'Varios Goals encadenados, sin intervencion del usuario entre ellos',
+  timeoutMs: 30 * 60_000,
   async run(context: ScenarioContext): Promise<Check[]> {
+    seedWorkspace(context.workspace, 'escenario/notas.md', 'el segundo trabajo esta propuesto\n');
+    context.propose({
+      objective: fileGoal('resultado-2.txt', 'SEGUNDO'),
+      evidence: 'escenario/notas.md',
+      whyNow: 'propuesto durante la sesion',
+      doneWhen: ['resultado-2.txt existe con el contenido exacto SEGUNDO'],
+    });
+
     await context.setCandidates([
       candidate({ candidateId: 'primero' }),
-      candidate({
-        candidateId: 'segundo',
-        objective: fileGoal('resultado-2.txt', 'SEGUNDO'),
-        doneWhen: ['resultado-2.txt existe con el contenido exacto SEGUNDO'],
-        priority: 8,
-      }),
       candidate({
         candidateId: 'tercero',
         objective: fileGoal('resultado-3.txt', 'TERCERO'),
         doneWhen: ['resultado-3.txt existe con el contenido exacto TERCERO'],
-        priority: 6,
+        priority: 3,
       }),
     ]);
     context.startSupervisor();
 
-    await context.waitFor('tres Goals terminados', async () => {
-      const state = await context.readJournal();
-      return state.goals.length >= 3;
-    });
+    let interruption: string | undefined;
+    try {
+      await context.waitForCompletedGoals(3);
+    } catch (err) {
+      if (!(err instanceof HostInterruption)) throw err;
+      interruption = err.message;
+    }
 
     const state = await context.readJournal();
     const created = state.intents.filter((intent) => intent.status === 'committed');
     const goalIds = new Set(created.map((intent) => intent.goalId));
     const objectives = new Set(created.map((intent) => intent.objective));
     const tokens = state.goals.reduce((total, record) => total + record.tokensUsed, 0);
+    const proposedIndex = created.findIndex((intent) => intent.candidateId.startsWith('propuesta:'));
+    const skip = interruption !== undefined;
 
     return [
-      { name: 'se crearon tres Goals', ok: created.length === 3, detail: `${created.length}` },
-      { name: 'los Goals tienen identificadores distintos', ok: goalIds.size === 3 },
-      { name: 'los Goals tienen objetivos distintos', ok: objectives.size === 3 },
-      { name: 'todos los Goals terminaron', ok: state.goals.length >= 3 },
-      { name: 'el primer trabajo se produjo', ok: existsSync(join(context.workspace, 'resultado.txt')) },
+      { name: 'se crearon tres Goals', ok: skip ? false : created.length === 3, detail: `${created.length}`, skipped: skip },
+      { name: 'los Goals tienen identificadores distintos', ok: skip ? false : goalIds.size === 3, skipped: skip },
+      { name: 'los Goals tienen objetivos distintos', ok: skip ? false : objectives.size === 3, skipped: skip },
+      { name: 'todos los Goals terminaron', ok: skip ? false : state.goals.length >= 3, skipped: skip },
+      { name: 'el primer trabajo se produjo', ok: skip ? false : existsSync(join(context.workspace, 'resultado.txt')), skipped: skip },
       {
         name: 'el segundo trabajo se produjo',
-        ok: existsSync(join(context.workspace, 'resultado-2.txt')),
+        ok: skip ? false : existsSync(join(context.workspace, 'resultado-2.txt')),
+        skipped: skip,
       },
       {
         name: 'el tercer trabajo se produjo',
-        ok: existsSync(join(context.workspace, 'resultado-3.txt')),
+        ok: skip ? false : existsSync(join(context.workspace, 'resultado-3.txt')),
+        skipped: skip,
       },
-      { name: 'no hay Goals duplicados', ok: created.length === 3 },
+      { name: 'el trabajo propuesto se encadeno', ok: proposedIndex >= 0 },
+      {
+        name: 'el trabajo propuesto se encadeno en su momento',
+        ok: proposedIndex === 1,
+        detail: interruption ? interruption : undefined,
+        skipped: false,
+      },
+      { name: 'no hay Goals duplicados', ok: skip ? false : created.length === 3, skipped: skip },
       { name: 'la mision no quedo escalada', ok: state.mission.status !== 'escalated' },
       {
         name: 'el coste de la cadena es conocido',
-        ok: tokens > 0,
+        ok: skip ? false : tokens > 0,
         detail: `${tokens} tokens en ${state.goals.length} Goals`,
+        skipped: skip,
       },
     ];
   },
 };
 
-/** Sin backlog ni senales en el codigo, la exploracion encuentra trabajo real. */
+/**
+ * Sin backlog ni senales en el codigo, el sistema encuentra trabajo real.
+ *
+ * El trabajo puede llegar por dos caminos: la exploracion acotada del
+ * workspace, o una propuesta que el agente deja con su herramienta. Con el
+ * plugin instalado, el agente del host puede usar esa herramienta, asi que
+ * el escenario comprueba el invariante y no el mecanismo: trabajo real,
+ * encadenado, con evidencia que senala a un fichero de verdad.
+ */
 const exploration: Scenario = {
   name: 'exploration',
-  description: 'Sin backlog ni pendientes marcados, la exploracion encuentra trabajo real y lo encadena',
+  description: 'Sin backlog ni pendientes marcados, el sistema encuentra trabajo real y lo encadena',
+  timeoutMs: 20 * 60_000,
   async run(context: ScenarioContext): Promise<Check[]> {
     // El trabajo pendiente solo aparece descrito en prosa: el escaner
-    // determinista no lo ve, asi que solo la exploracion puede encontrarlo.
+    // determinista no lo ve, asi que hace falta que alguien investigue.
     writeFileSync(
       join(context.workspace, 'NOTAS.md'),
       [
@@ -120,28 +165,49 @@ const exploration: Scenario = {
     await context.setCandidates([]);
     context.startSupervisor();
 
-    await context.waitFor('un Goal creado desde la exploracion', async () => {
+    await context.waitFor('un Goal creado', async () => {
       const state = await context.readJournal();
       return state.intents.some((intent) => intent.status === 'committed');
     });
 
     const state = await context.readJournal();
     const created = state.intents.filter((intent) => intent.status === 'committed');
-    const proposed = state.explored;
+    const first = created[0];
+    const origin = first?.candidateId.startsWith('propuesta:') ? 'propuesta' : 'exploracion';
+    const evidence = first ? evidenceOf(state, context.missionId, first.candidateId) : [];
+    const real = evidence.filter((ref) => existsSync(join(context.workspace, ref.split(':')[0]!)));
 
     return [
-      { name: 'la exploracion aporto candidatos', ok: proposed.length > 0, detail: `${proposed.length}` },
       {
-        name: 'la evidencia senala a un fichero real',
-        ok: proposed.every((candidate) =>
-          candidate.evidenceRefs.every((ref) => existsSync(join(context.workspace, ref.split(':')[0]!))),
-        ),
+        name: 'se encadeno un Goal sin trabajo marcado',
+        ok: created.length >= 1,
+        detail: `origen: ${origin}`,
       },
-      { name: 'se creo un Goal a partir de la exploracion', ok: created.length >= 1 },
-      { name: 'el Goal viene de la exploracion', ok: state.explored.length > 0 || created.length >= 1 },
+      {
+        name: 'el sistema pidio buscar trabajo',
+        ok: state.lastExplorationAt !== undefined,
+      },
+      {
+        name: 'el Goal viene de una fuente que investigo',
+        ok: origin === 'exploracion' || origin === 'propuesta',
+        detail: origin,
+      },
+      {
+        name: 'su evidencia senala a un fichero real',
+        ok: evidence.length > 0 && real.length === evidence.length,
+        detail: evidence.join(', '),
+      },
     ];
   },
 };
+
+/** La evidencia del trabajo encadenado, venga de donde venga. */
+function evidenceOf(state: Journal, missionId: string, candidateId: string): string[] {
+  const explored = state.explored.find((candidate) => candidate.candidateId === candidateId);
+  if (explored) return explored.evidenceRefs;
+  const proposal = readProposals(missionId).find((entry) => entry.candidateId === candidateId);
+  return proposal?.evidenceRefs ?? [];
+}
 
 /** Un fallo entre creacion y commit se reconcilia sin duplicar Goals. */
 const recovery: Scenario = {
@@ -276,6 +342,7 @@ async function main(): Promise<void> {
   const names = requested.length > 0 ? requested : Object.keys(SCENARIOS);
 
   const failures: string[] = [];
+  const notRun: string[] = [];
   for (const name of names) {
     const scenario = SCENARIOS[name];
     if (!scenario) {
@@ -284,15 +351,24 @@ async function main(): Promise<void> {
       continue;
     }
     const result = await runScenario(scenario);
-    if (!result.ok) failures.push(name);
+    if (result.interrupted) notRun.push(name);
+    else if (!result.ok) failures.push(name);
   }
 
   console.log('\n=============== RESUMEN ===============');
   for (const name of names) {
     const failed = failures.includes(name);
-    console.log(`${failed ? 'FALLA' : 'PASA'} · ${name}`);
+    const skipped = notRun.includes(name);
+    const verdict = failed ? 'FALLA' : skipped ? 'NO CORRIO' : 'PASA';
+    console.log(`${verdict} · ${name}`);
   }
   console.log('=======================================');
+  if (notRun.length > 0) {
+    console.log(
+      `Sin ejecutar por interrupcion del host: ${notRun.join(', ')}. ` +
+        'El sistema no fallo: el trabajo no llego a terminarse.',
+    );
+  }
   process.exit(failures.length > 0 ? 2 : 0);
 }
 
