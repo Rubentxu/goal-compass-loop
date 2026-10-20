@@ -487,6 +487,56 @@ muerta en silencio.** Preguntar al modelo cuesta un turno entero y no cabe en
 un hook de nueve segundos; la única forma de que la cadena siga es que quien
 trabaja deje lo que viene. Pedirlo no es una formalidad: es el combustible.
 
+### 3.15 La misión se activa con una frase
+
+El plugin estaba instalado en todas las sesiones, la skill estaba disponible, y
+aun así **no había forma de empezar**. El hook busca la declaración de la
+misión en el proyecto; si no la encuentra, no encadena nada y no dice por qué.
+Y la forma de crear esa declaración no estaba escrita en ningún sitio: la skill
+explicaba cómo seguir una misión, no cómo empezar una.
+
+Ahora hay una puerta, y da igual por dónde se entre:
+
+```bash
+node dist/cli.js declare --workspace /ruta/al/proyecto \
+  --objective "Mejorar este proyecto paso a paso"
+```
+
+o la herramienta `mission_declare` desde la conversación, o el fichero
+`goal-compass.json` a mano. Las tres hacen lo mismo.
+
+La puerta tiene dos reglas que importan más que la puerta:
+
+- **No pisa.** Si ya hay una declaración, la devuelve tal cual. Declarar dos
+  veces no rompe nada, y una declaración escrita a mano no se pierde por
+  detrás de la herramienta.
+- **No inventa el identificador.** Sale del nombre del proyecto y de una
+  huella corta de su ruta. El estado durable se guarda por identificador, fuera
+  del repositorio: dos proyectos con el mismo identificador se pisarían en
+  silencio, y eso ya no puede pasar. Si alguien lo fuerza, el sistema lo dice y
+  no conduce.
+
+Con eso, la pregunta «¿puedo usarlo ya en la sesión que tengo abierta?» tiene
+respuesta: **sí, con un prompt.** Se declara la misión del proyecto (una vez) y
+después:
+
+> Continúa la misión de este repositorio.
+
+El agente carga la skill, comprueba la misión y sigue. Al terminar el turno, el
+hook crea el siguiente objetivo en esa misma sesión.
+
+Comprobado con el host real: una sesión de MCode con ese prompt encadenó un
+objetivo en la sesión del usuario, y el objetivo nació de una propuesta que
+había dejado el propio agente. Después, el agente trabajó en el repositorio:
+creó su `package.json`, su módulo y sus pruebas.
+
+#### La lección
+
+**Instalar no es activar.** Entre una cosa y otra hay un paso que, si falta,
+hace que todo lo demás parezca que no funciona: el sistema está en su sitio,
+pero no tiene nada que hacer y calla. Un paso que se salta sin decir nada es
+peor que un paso que no existe, porque hace dudar de lo que sí funciona.
+
 ## 4. Cómo se usa
 
 ### Con el plugin (lo recomendado)
@@ -498,9 +548,20 @@ node dist/cli.js install-plugin        # ensambla el plugin
 mcode plugin add goal-compass -m local # lo registra en MCode
 ```
 
-Después, en el repositorio donde quieras encadenar, crea `goal-compass.json`.
-El `workspace` se toma del sitio donde vive el fichero, así que no hace falta
-escribirlo:
+Después, en el repositorio donde quieras encadenar, declara la misión. La vía
+rápida es un comando:
+
+```bash
+node dist/cli.js declare --workspace /ruta/al/proyecto \
+  --objective "Mejorar y estabilizar este proyecto"
+```
+
+El comando escribe `goal-compass.json`, deja preparado el directorio de trabajo
+del proyecto y deriva un identificador de misión distinto para cada proyecto.
+No pisa una declaración que ya exista, y declararlo dos veces no rompe nada.
+
+Si prefieres escribirla a mano, el fichero se llama `goal-compass.json` y el
+`workspace` se toma del sitio donde vive, así que no hace falta escribirlo:
 
 ```json
 {
@@ -523,14 +584,18 @@ escribirlo:
 }
 ```
 
-Abre una sesión de MCode en ese repositorio y ya está. Cada vez que el agente
-termina su turno, el hook comprueba el objetivo en curso: si está terminado,
-crea el siguiente en esa misma sesión y le devuelve el turno.
+Abre una sesión de MCode en ese repositorio y pide:
 
-Dentro de la conversación, el agente dispone además de las cinco herramientas
-(`mission_status`, `mission_propose`, `mission_pause`, `mission_resume`,
-`mission_stop`). Basta con pedirle en voz alta que mire el estado de la misión
-o que la pause: el modelo las invoca por su cuenta.
+> Continúa la misión de este repositorio.
+
+Cada vez que el agente termina su turno, el hook comprueba el objetivo en curso:
+si está terminado, crea el siguiente en esa misma sesión y le devuelve el turno.
+
+Dentro de la conversación, el agente dispone además de las seis herramientas
+(`mission_status`, `mission_declare`, `mission_propose`, `mission_pause`,
+`mission_resume`, `mission_stop`). Basta con pedirle en voz alta que mire el
+estado de la misión, que la pause o que la declare si no existe: el modelo las
+invoca por su cuenta.
 
 ### Con el supervisor en segundo plano
 

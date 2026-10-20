@@ -1140,7 +1140,134 @@ escenario de exploración siguió midiendo lo que mide: trabajo real, encontrado
 por el modelo, encadenado por el supervisor, con evidencia que señala a
 ficheros que existen y sin encadenar el mismo trabajo dos veces.
 
-## 9 · Lo que NO se ha ejecutado
+## 9 · La misión se activa con una frase
+
+### 9.1 El hueco que quedaba abierto
+
+Todo estaba instalado, pero **no había nada que activar**. El hook busca la
+declaración de la misión en el proyecto; si no la encuentra, no hay nada que
+encadenar y no dice por qué. Y la forma de crearla no estaba escrita en
+ningún sitio: la skill explicaba cómo *seguir* una misión, no cómo *empezar*
+una.
+
+Eso convertía «quiero usarlo ya» en una tarea de diez minutos con un paso
+imposible de adivinar. Un escáner que descarta en silencio, otra vez.
+
+### 9.2 Declarar es una puerta, no un fichero
+
+Ahora hay una sola puerta para declarar una misión, con tres entradas que
+hacen lo mismo:
+
+| Entrada | Para qué |
+|---|---|
+| `goal-compass declare --workspace <dir>` | Preparar un proyecto desde la línea de órdenes |
+| `mission_declare` | Declararla desde la sesión, sin salir de la conversación |
+| `goal-compass.json` a mano | Cuando se quiere controlar el contenido palabra por palabra |
+
+Las tres acaban en la misma función, y esa función tiene dos reglas:
+
+- **No pisa.** Si ya hay una declaración, la devuelve tal cual. Declarar dos
+  veces no rompe nada y una declaración escrita a mano no se pierde por
+  detrás de la herramienta.
+- **No inventa el identificador.** Sale del nombre del proyecto y de una
+  huella corta de su ruta, así que dos proyectos con el mismo nombre no
+  comparten estado durable por accidente.
+
+El identificador importa más de lo que parece. El estado durable vive en
+`~/.local/state/goal-compass/<mission-id>/`, fuera del repositorio: si dos
+proyectos se apropian del mismo identificador, se pisan **en silencio**, y cada
+uno creería que está solo. Eso ya no puede pasar por dos vías:
+
+- la herramienta deriva un identificador distinto por proyecto;
+- si alguien fuerza el mismo identificador en dos proyectos, el sistema lo dice
+  y **no conduce**: «la misión "X" ya tiene estado del proyecto "Y"».
+
+### 9.3 La prueba, con el host real y un prompt
+
+Proyecto de prueba en `/tmp/gcl-prompt-demo`, con la declaración hecha a
+mano con el comando:
+
+```bash
+$ node dist/cli.js declare --workspace /tmp/gcl-prompt-demo \
+    --objective "Mejorar este proyecto de prueba paso a paso"
+mision declarada en /tmp/gcl-prompt-demo/goal-compass.json
+mision: gcl-prompt-demo-7eb9
+conduce: plugin
+```
+
+Y después, una sesión real de MCode con un prompt de los que el usuario
+escribe:
+
+```bash
+$ mcode exec "continua la mision de este repositorio" \
+    --cwd /tmp/gcl-prompt-demo --permission off
+```
+
+Lo que pasó:
+
+```text
+$ cat ~/.local/state/goal-compass/gcl-prompt-demo-7eb9/journal.json
+  "sessionId": "mvs_2ce1cd2211c54a28967fb302ed5b6450",
+  "driver": "plugin",
+  "driverAt": 1792489441063,
+  "intents": [("propuesta:Automatizar la verificación con un workflow...", "committed", "tg_36ehdi5tpzmvghwkkh")]
+```
+
+Y lo que el agente hizo con ese objetivo, en el repositorio de prueba:
+
+```text
+package.json        ← con "test": "node --test"
+test/mision.test.js ← dos pruebas de un módulo nuevo
+app.js              ← el módulo que las pruebas cubren
+```
+
+Lo que demuestra, en orden:
+
+1. **Un prompt basta.** No hubo ningún paso previo: la declaración existía, el
+   hook la encontró al cerrar el turno y encadenó.
+2. **El objetivo nació en la sesión del usuario** (`sessionId` del host), no en
+   una aparte.
+3. **La cadena se alimentó sola.** El objetivo no salió de un backlog escrito
+   a mano, sino de una **propuesta que el agente dejó** con su evidencia. Es
+   el bucle de continuidad funcionando: el trabajo siguiente lo deja quien
+   termina el anterior.
+4. **El agente trabajó de verdad**, con ficheros en el repositorio y pruebas
+   que las ejecutan.
+
+Lo único que no salió bien fue el apagado: MCode terminó el turno con
+«Runtime shutdown did not complete cleanly». Es del runtime del host al
+desconectar, después de que el objetivo ya estuviera creado y confirmado; el
+journal y la transición quedaron íntegros.
+
+### 9.4 Lo que el cambio añadió al producto
+
+- El comando `declare`, que deja el proyecto con su declaración, su directorio
+  de trabajo y su entrada en `.gitignore`.
+- La herramienta `mission_declare`, que hace lo mismo desde la conversación.
+- La sección de la skill que explica cómo activar la misión, con el comando
+  como alternativa cuando la herramienta no está en la sesión.
+- La detección del identificador ocupado: dos proyectos con el mismo
+  identificador se dicen en vez de pisarse.
+
+### 9.5 La aceptación, después del cambio
+
+```text
+=============== RESUMEN ===============
+PASA · chain
+PASA · recovery
+PASA · pause
+PASA · budget
+PASA · exploration
+=======================================
+```
+
+Veintiocho comprobaciones, con las cifras de esta ejecución. La suite permanente
+sube a **144 pruebas en 12 ficheros**: las nuevas cubren el identificador
+derivado, la declaración que no pisa, la que se puede escribir a mano, la que
+está a medio hacer, la que no es legible, el enlace simbólico que apunta al
+mismo sitio y el proyecto que ocupa el identificador de otro.
+
+## 10 · Lo que NO se ha ejecutado
 
 - **El plugin no se ha probado en la interfaz gráfica.** La validación se ha
   hecho con `mcode exec`, que es la misma ruta de hooks pero sin pantalla.

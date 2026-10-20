@@ -121,12 +121,13 @@ terminado, **crea el siguiente en esa misma sesión** y devuelve el turno al
 agente. No hay ningún proceso de fondo: el cierre de turno es el latido de la
 misión.
 
-Además, el plugin entrega cinco herramientas para que el agente pueda mirar
+Además, el plugin entrega seis herramientas para que el agente pueda mirar
 la misión y gobernarla sin salir de la conversación:
 
 | Herramienta | Qué hace |
 |---|---|
 | `mission_status` | En qué está la misión, cuántos objetivos ha encadenado y qué trabajo hay disponible |
+| `mission_declare` | Declara la misión del proyecto cuando todavía no existe; si ya existe, no la toca |
 | `mission_propose` | Propone el siguiente objetivo; la evidencia tiene que señalar a un fichero que exista y hace falta decir cómo se sabrá que está hecho |
 | `mission_pause` | Pausa la cadena y el objetivo en curso |
 | `mission_resume` | Reanuda una misión pausada o dormida |
@@ -138,9 +139,15 @@ encadena. Una propuesta sobre un fichero que no existe se descarta, y una
 propuesta sin criterio de cierre también: la herramienta lo dice en vez de
 registrar un trabajo que luego se descartaría en silencio.
 
-Después, en el repositorio donde quieras encadenar, crea `goal-compass.json`
-con la declaración de la misión. El `workspace` se toma del sitio donde vive
-el fichero, así que no hace falta escribirlo.
+Después, en el repositorio donde quieras encadenar, declara la misión. La vía
+rápida es el comando:
+
+```bash
+node dist/cli.js declare --workspace /ruta/al/proyecto --objective "Mejorar este proyecto"
+```
+
+Si prefieres escribirla a mano, el fichero se llama `goal-compass.json` y el
+`workspace` se toma del sitio donde vive, así que no hace falta escribirlo.
 
 ```json
 {
@@ -253,10 +260,51 @@ node dist/cli.js init --config ./mission.json   # prepara el estado durable
 node dist/cli.js run  --config ./mission.json   # arranca el bucle
 ```
 
+## Activarlo con un prompt
+
+Es la vía corta, y la que hace falta cuando ya tienes el plugin instalado y
+estás trabajando en una sesión de MCode abierta.
+
+**1. Declara la misión del proyecto** (una vez por proyecto):
+
+```bash
+node dist/cli.js declare --workspace /ruta/al/proyecto \
+  --objective "Mejorar este proyecto paso a paso, con evidencia"
+```
+
+El comando deja tres cosas:
+
+- `goal-compass.json` en la raíz del proyecto, con la declaración de la misión.
+- `.goal-compass/`, el directorio de trabajo, con su entrada en `.gitignore`.
+- El identificador de la misión, derivado del nombre y de la ruta del proyecto
+  para que dos proyectos no compartan estado por accidente.
+
+No pisa una declaración que ya exista: si el fichero está a mano, se respeta. Y
+declarar dos veces es inofensivo.
+
+**2. Pídeselo a la sesión.** En MCode, con el proyecto abierto:
+
+> Continúa la misión de este repositorio.
+
+El agente carga la skill `goal-compass`, comprueba si hay misión y, si la hay,
+la sigue. A partir de ahí, cada vez que termina un objetivo, el hook crea el
+siguiente en la misma sesión y le devuelve el turno.
+
+**Ojo con una cosa:** el estado durable se guarda por identificador de misión,
+fuera del repositorio. Dos proyectos con el mismo identificador se pisarían, así
+que cada proyecto necesita el suyo. Si el repositorio ya trae un
+`goal-compass.json` versionado, respeta su identificador; si no, deja que la
+herramienta derive uno.
+
+Desde la sesión también se puede declarar sin la línea de órdenes, con la
+herramienta `mission_declare` del plugin: necesita un objetivo en una frase y
+se encarga del resto.
+
 ## Comandos
 
 | Comando | Qué hace |
 |---|---|
+| `declare --workspace <dir>` | Declara la misión de un proyecto y prepara su directorio de trabajo |
 | `init --config <mission.json>` | Prepara el estado durable de la misión |
 | `run --config <mission.json>` | Arranca el bucle supervisor |
 | `status --mission <id>` | Muestra estado, objetivos, tokens y control pendiente |
@@ -264,6 +312,7 @@ node dist/cli.js run  --config ./mission.json   # arranca el bucle
 | `resume --mission <id>` | Reanuda una misión pausada o dormida |
 | `stop --mission <id>` | Detiene la cadena |
 | `probe --workspace <dir>` | Comprueba la extensión ACP contra el host |
+| `tree --workspace <dir>` | Prepara el árbol de decisión del proyecto y lo valida |
 | `install-skill` | Instala la skill en el directorio del programa |
 | `install-plugin` | Ensambla el plugin de MCode en el marketplace local |
 
