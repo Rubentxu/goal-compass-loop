@@ -127,14 +127,16 @@ la misión y gobernarla sin salir de la conversación:
 | Herramienta | Qué hace |
 |---|---|
 | `mission_status` | En qué está la misión, cuántos objetivos ha encadenado y qué trabajo hay disponible |
-| `mission_propose` | Propone el siguiente objetivo; la evidencia tiene que señalar a un fichero que exista |
+| `mission_propose` | Propone el siguiente objetivo; la evidencia tiene que señalar a un fichero que exista y hace falta decir cómo se sabrá que está hecho |
 | `mission_pause` | Pausa la cadena y el objetivo en curso |
 | `mission_resume` | Reanuda una misión pausada o dormida |
 | `mission_stop` | Termina la cadena |
 
 La propuesta es el camino para cuando no hay trabajo marcado: el agente
 investiga, propone con su evidencia, y el cierre de turno siguiente lo
-encadena. Una propuesta sobre un fichero que no existe se descarta.
+encadena. Una propuesta sobre un fichero que no existe se descarta, y una
+propuesta sin criterio de cierre también: la herramienta lo dice en vez de
+registrar un trabajo que luego se descartaría en silencio.
 
 Después, en el repositorio donde quieras encadenar, crea `goal-compass.json`
 con la declaración de la misión. El `workspace` se toma del sitio donde vive
@@ -228,7 +230,9 @@ El supervisor usa un `mission.json` **fuera del repositorio analizado**:
 - `prerequisites` referencia otros `candidateId`: un candidato con un
   prerrequisito sin completar no es elegible.
 - `allowRemoteWrite: false` mantiene `push`, releases y despliegues fuera del
-  alcance automático.
+  alcance automático. El supervisor no tiene ninguna ruta que escriba fuera
+  del repositorio; lo que hace esta bandera es llevar el límite de la misión
+  hasta el agente, que es el único que puede publicar.
 
 El backlog se relee del fichero en cada ciclo: si añades un candidato mientras
 la misión está `parked`, el supervisor lo detecta y reanuda solo.
@@ -276,7 +280,13 @@ plugin/                Paquete del plugin de MCode (manifiesto, hook, MCP, icono
 spikes/                arnés + escenarios de aceptación contra el host real
 test/                  pruebas permanentes y arnés compartido
 docs/                  CICLO.md · EVIDENCIA.md · adr/
+spec/                  kit de especificación congelado en la v0.2, como contexto
 ```
+
+La carpeta `spec/` es el **kit de especificación de la v0.2**, conservado como
+documento histórico: explica el encargo, los límites y las decisiones de
+entrada. No es el código que se ejecuta. El grafo de la skill que sí se
+instala vive en `skill/goal-compass/` y lo comprueba la suite permanente.
 
 El núcleo no importa nada de los adaptadores. `decide()` no lee ficheros, no
 llama a la red y no conoce el reloj: recibe un `Snapshot` y devuelve una
@@ -285,7 +295,7 @@ llama a la red y no conoce el reloj: recibe un `Snapshot` y devuelve una
 ## Pruebas
 
 ```bash
-npm test          # 85 pruebas permanentes
+npm test          # 95 pruebas permanentes
 npm run uat       # escenarios contra el host real, con recibos
 npm run typecheck
 ```
@@ -303,8 +313,17 @@ del plugin** se prueba contra ese mismo host: se comprueba que el objetivo se
 crea en la sesión del evento, que la misión queda con la intención confirmada
 y que ni un fallo del host ni la falta de tiempo rompen el turno.
 
+La **skill que se entrega** también tiene contrato: cada nodo del grafo tiene
+que tener su forma, sus enlaces tienen que apuntar a nodos que existen y hay
+que poder llegar a todos ellos y salir de todos ellos. Se comprueba en la
+suite permanente, contra el mismo fichero que se instala.
+
 Los escenarios de aceptación (`chain`, `recovery`, `pause`, `budget`,
 `exploration`) se ejecutan en un directorio temporal que se borra al terminar.
+El arnés monta **las mismas fuentes de trabajo que el producto**, para que los
+escenarios no puedan estar probando otro sistema. Su recibo tiene tres
+estados: `PASA`, `FALLA` y `NO CORRIO`, este último para cuando el host deja
+el trabajo a medias y la comprobación no se pudo hacer.
 
 ## Lo que este proyecto NO hace
 

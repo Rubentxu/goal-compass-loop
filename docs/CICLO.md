@@ -33,7 +33,7 @@ La **misión** es la intención de largo plazo. Los **objetivos** son las unidad
 de trabajo: pequeños, verificables, y se hacen de verdad. Que un objetivo se
 complete no significa que la misión se haya acabado.
 
-## 2. Las dos piezas y por qué son dos
+## 2. Las tres piezas y por qué son tres
 
 Hay una limitación en el propio MCode: el modelo **no puede crear otro
 objetivo**. Solo puede leer el actual y marcarlo como terminado. Crear el
@@ -242,6 +242,94 @@ hay que buscar el fallo en el código propio: hay que mirar el directorio de
 datos y comprobar si el candado está vivo. Si su marca de tiempo no se mueve,
 está huérfano y se puede retirar.
 
+### 3.10 Lo que el sistema promete tiene que ser verdad
+
+Este ciclo no ha añadido capacidades: ha **arreglado promesas que no se
+cumplían**. Y encontró tres, que son el mismo tipo de problema.
+
+**La primera: una herramienta que prometía un trabajo que se perdía.** Cuando
+el agente proponía el siguiente objetivo, la herramienta contestaba
+"Propuestas utilizables: 1. Se encadenará en el próximo cierre de turno." Pero
+la propuesta **nunca se encadenaba**: el motor descarta todo trabajo que no
+diga cómo se sabrá que está hecho, y ese dato era opcional en la herramienta.
+El agente veía un mensaje de éxito y su trabajo se perdía en silencio.
+
+Es exactamente el fallo que el sistema existe para evitar, pero probado al revés:
+en vez de inventar trabajo, lo **descartaba sin decirlo**.
+
+El arreglo tiene dos partes, y las dos importan:
+
+- La herramienta **exige** el criterio de cierre y, si falta, explica por qué
+  y no registra nada. Fallar pronto y con el motivo es mejor que prometer.
+- La regla de "qué es trabajo" vive **en un solo sitio**, en el motor, y la
+  usan tanto el motor como el canal de propuestas. Antes cada uno tenía su
+  propia idea y por eso se contradecían.
+
+**La segunda: el arnés probaba otro sistema.** Los escenarios de aceptación
+montaban su propia lista de fuentes de trabajo, y esa lista no era la que usa
+el producto: le faltaba el canal de propuestas. Es decir, la mitad de lo que
+el sistema hace no lo probaba nadie, y el arnés podía dar verde mientras el
+producto fallaba.
+
+Ahora hay **un solo lugar** que decide de dónde sale el trabajo, y lo usan
+las dos partes. Cuando esto se rompa, se rompe en los dos sitios a la vez, y
+se ve.
+
+**La tercera: la skill que se entrega no la comprobaba nadie.** El kit de
+especificación traía un comprobador de la forma del grafo, pero miraba **una
+copia congelada** de la skill, no la que se instala. La skill de verdad ya
+había cambiado en cuatro ficheros y nadie se enteraba. La comprobación era
+teatro: comprobaba algo que nadie usa.
+
+Ahora el grafo que se instala tiene contrato en la suite permanente: cada nodo
+tiene su forma, cada enlace apunta a un nodo que existe, se puede llegar a
+todos los nodos y se puede salir de todos ellos. Y —esto es lo importante—
+**se ha probado que el contrato muerde**: rompiendo un enlace a propósito, la
+comprobación falla diciendo qué fichero y por qué.
+
+### 3.11 El límite de la misión llega al agente
+
+`allowRemoteWrite` estaba en la configuración de la misión, se guardaba en el
+estado durable y **no lo consultaba nadie**. Era una promesa escrita en un
+fichero, no un límite.
+
+Ahora el límite viaja en el mensaje que el hook le devuelve al agente al
+encadenar un objetivo, porque el agente es el único que puede hacer `push`,
+publicar o desplegar. Si la misión no lo autoriza, el agente lo sabe antes de
+empezar, no después.
+
+Y se ha quitado por el camino una función exportada que ya no usaba nadie y
+un ayudante del arnés que además estaba mal hecho: creaba una carpeta con el
+nombre troceado y fallaba al escribir ficheros en subdirectorios.
+
+### 3.12 Y una prueba que se hizo sola
+
+Lo mejor que salió de este ciclo no lo forzamos: **ocurrió**.
+
+Al pedirle al agente del programa que buscara trabajo en un repositorio de
+prueba, el agente **usó la herramienta de propuestas del propio plugin** para
+dejar su propuesta: con su evidencia, con su motivo y con su criterio de
+cierre. Después, el sistema encadenó esa propuesta como objetivo siguiente.
+
+Es el circuito entero, sin que nadie lo orquestara:
+
+```text
+agente investiga  ->  agente propone con la herramienta  ->  el sistema encadena
+```
+
+Y demuestra, además, que el arreglo de este ciclo era necesario: con el
+contrato anterior, ese mismo agente habría registrado un trabajo que se
+perdía en silencio. La propuesta traía criterio de cierre, y gracias a eso se
+encadenó.
+
+Y salta a la vista algo que conviene entender: **el objetivo lo encadenó el
+hook del plugin, no el supervisor**. En la UAT conviven las dos vías de
+encadenado, porque el escenario arranca el supervisor y el anfitrión trae el
+plugin. No chocan —el journal deduplica por clave estable de candidato y la
+creación se confirma con una lectura posterior—, pero la lección es clara: el
+plugin y el supervisor son **vías alternativas** de encadenar trabajo, y en una
+instalación real hay que elegir una.
+
 ## 4. Cómo se usa
 
 ### Con el plugin (lo recomendado)
@@ -372,7 +460,7 @@ comprueba que aparece en la lista de skills.
 
 Hay dos niveles, y no se mezclan:
 
-**Pruebas permanentes** (`npm test`) — 85 pruebas que corren en menos de tres
+**Pruebas permanentes** (`npm test`) — 95 pruebas que corren en menos de tres
 segundos. Comprueban la lógica: qué se decide, cuándo se crea un objetivo,
 cuándo no, cómo se reconcilia un fallo a medias, cuándo se detecta el
 estancamiento y qué propuestas de exploración se aceptan.
@@ -387,19 +475,44 @@ emparejadas con su respuesta, una herramienta que no existe se avisa en vez de
 fallar en silencio, y una herramienta que se rompe por dentro devuelve el
 motivo).
 
+Y hay una cuarta cosa que se comprueba, que no es código sino el mapa que lee
+el agente: **la forma del grafo de la skill**. Cada nodo tiene que tener sus
+secciones, sus enlaces tienen que apuntar a nodos que existen, y desde
+cualquier nodo se tiene que poder llegar a un cierre. Sin esto, un enlace
+roto en la skill manda al agente a un sitio inexistente y no hay ninguna
+prueba que lo note.
+
 **Escenarios de aceptación** (`npm run uat`) — contra el programa real, con
 tiempo límite y recibos. Comprueban la capacidad completa:
 
 | Escenario | Qué demuestra |
 |---|---|
-| `chain` | Tres objetivos encadenados, sin intervención del usuario entre ellos. |
+| `chain` | Tres objetivos encadenados, sin intervención del usuario entre ellos; el del medio llega por el canal de propuestas y se encadena en su momento. |
 | `recovery` | Un fallo entre crear y confirmar se reconcilia sin duplicar. |
 | `pause` | La orden de pausa detiene el trabajo en curso y la de continuar lo reanuda. |
 | `budget` | Agotado el presupuesto, no se encadena otro objetivo. |
 | `exploration` | Sin backlog ni pendientes marcados, la exploración encuentra trabajo real. |
 
 Los escenarios se ejecutan en un directorio temporal que se borra al terminar, y
-dejan un recibo con el resultado de cada comprobación.
+dejan un recibo con el resultado de cada comprobación. El arnés monta **las
+mismas fuentes de trabajo que el producto**, para que los escenarios no
+puedan estar probando otro sistema.
+
+Y el recibo tiene **tres estados**, no dos:
+
+| Estado | Qué quiere decir |
+|---|---|
+| `PASA` | Se comprobó y se cumplió |
+| `FALLA` | Se comprobó y no se cumplió |
+| `NO CORRIO` | El host dejó el trabajo a medias y no se pudo comprobar |
+
+El tercero importa más de lo que parece. El host puede abortar el verificador
+de un objetivo o quedarse sin recursos a mitad de una cadena. Cuando eso pasa,
+el sistema ha hecho lo correcto: negarse a encadenar otro objetivo y esperar.
+Si el arnés dijera "falló", estaría señalando un problema donde no lo hay, y
+la próxima vez nadie miraría ese rojo. Si dijera "pasó", estaría mintiendo
+sobre una comprobación que no se hizo. Por eso hay un tercer estado, y por eso
+el resumen de la ejecución dice cuántos escenarios se quedaron sin comprobar.
 
 ## 6. Lo que el sistema no hace
 
