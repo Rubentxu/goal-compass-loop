@@ -36,6 +36,27 @@ links:
 Si el proyecto tiene su propio árbol en `.goal-compass/`, ese manda sobre el
 de la skill: es la configuración local del proyecto.
 
+## Activar la misión
+
+Una misión se activa **declarándola**. El primer paso de cualquier trabajo
+con esta skill es mirar si ya existe:
+
+- `mission_status` responde con la misión → ya está activa, sigue con el
+  protocolo.
+- `mission_status` dice que no hay ninguna → declárala con `mission_declare`
+  y un objetivo en una frase. Si esa herramienta no está disponible en esta
+  sesión, el comando hace lo mismo:
+  `node ~/.minimax/plugins/goal-compass/dist/cli.js declare --workspace <directorio del proyecto>`.
+
+No inventes una misión para un proyecto que el usuario no ha pedido: declarar
+es una decisión suya, y se la pides si dudas.
+
+Cada proyecto necesita la suya. El estado durable se guarda por identificador
+de misión, y dos proyectos con el mismo identificador se pisarían en
+silencio. El identificador por defecto se deriva del nombre y de la ruta del
+proyecto, de modo que es distinto en cada uno; si el proyecto ya tiene uno
+propio, se respeta tal cual.
+
 ## Protocolo
 
 1. Identifica objetivo verificable, evidencia ya observada y bloqueo actual; distingue hechos de conjeturas. Si el objetivo es pequeño, entra directamente en la fase pertinente.
@@ -77,6 +98,7 @@ proponer trabajo. Úsalas cuando te sirvan, no por costumbre:
 | Herramienta | Para qué |
 |---|---|
 | `mission_status` | Saber en qué está la Mission y qué trabajo hay disponible. |
+| `mission_declare` | Declarar la misión del proyecto cuando todavía no existe. |
 | `mission_propose` | Proponer el siguiente objetivo cuando no hay trabajo obvious. |
 | `mission_pause` / `mission_resume` / `mission_stop` | Mandar una orden sobre la cadena. |
 
