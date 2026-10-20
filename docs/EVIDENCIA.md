@@ -720,16 +720,16 @@ Los cinco escenarios, con sus comprobaciones:
 
 | Escenario | Comprobaciones | Resultado |
 |---|---|---|
-| `chain` | 12 | Tres objetivos encadenados sin intervención; el del medio llega por el canal de propuestas y se encadena en su momento; 114 361 tokens medidos |
+| `chain` | 12 | Tres objetivos encadenados sin intervención; el del medio llega por el canal de propuestas y se encadena en su momento; 123 747 tokens medidos |
 | `recovery` | 4 | Un fallo entre crear y confirmar se reconcilia sin duplicar |
 | `pause` | 3 | La orden de pausa detiene el trabajo en curso y la de continuar lo reanuda |
-| `budget` | 3 | Agotado el presupuesto (65 460 tokens), la cadena se detiene sin crear otro objetivo |
+| `budget` | 3 | Agotado el presupuesto (67 456 tokens), la cadena se detiene sin crear otro objetivo |
 | `exploration` | 6 | Sin backlog ni pendientes marcados, el sistema pide buscar trabajo, encuentra trabajo real y lo encadena, con evidencia que señala a ficheros que existen, y sin encadenar el mismo trabajo dos veces |
 
-La última ejecución es la del ciclo del árbol como dato (sección 8), con las
-mismas 28 comprobaciones del ciclo anterior: el árbol con cabecera YAML no
-toca al supervisor, y el escenario de exploración sigue midiendo lo que
-midía.
+La última ejecución es la del ciclo de activar la misión con una frase
+(sección 9), con las mismas 28 comprobaciones del ciclo anterior: declarar una
+misión no toca al supervisor, y los cinco escenarios lo confirman igual contra
+el host real.
 
 La cadena, con el trabajo del medio llegando por el canal de propuestas:
 
@@ -1261,11 +1261,15 @@ PASA · exploration
 =======================================
 ```
 
-Veintiocho comprobaciones, con las cifras de esta ejecución. La suite permanente
-sube a **144 pruebas en 12 ficheros**: las nuevas cubren el identificador
-derivado, la declaración que no pisa, la que se puede escribir a mano, la que
-está a medio hacer, la que no es legible, el enlace simbólico que apunta al
-mismo sitio y el proyecto que ocupa el identificador de otro.
+Veintiocho comprobaciones, con las cifras de esta ejecución: la cadena costó
+123 747 tokens en tres objetivos y el freno de gasto se paró en 67 456. El
+escenario de exploración siguió midiendo lo que mide: trabajo real, con
+evidencia que señala a ficheros que existen, encadenado una sola vez.
+
+La suite permanente sube a **144 pruebas en 12 ficheros**: las nuevas cubren el
+identificador derivado, la declaración que no pisa, la que se puede escribir a
+mano, la que está a medio hacer, la que no es legible, el enlace simbólico que
+apunta al mismo sitio y el proyecto que ocupa el identificador de otro.
 
 ## 10 · Lo que NO se ha ejecutado
 
