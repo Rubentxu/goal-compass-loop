@@ -321,7 +321,8 @@ describe('supervisor · exploracion acotada', () => {
   });
 });
 
-describe('supervisor · presupuesto de la mision', () => {  it('deja la mision dormida cuando el presupuesto se agota', async () => {
+describe('supervisor · presupuesto de la mision', () => {
+  it('deja la mision dormida cuando el presupuesto se agota', async () => {
     const mission = aMission({ totalTokenBudget: 1_000 });
     const journal = new MemoryJournal({
       ...anEmptyJournal(mission),
@@ -409,5 +410,45 @@ describe('supervisor · presupuesto de la mision', () => {  it('deja la mision d
     await supervisor.run();
 
     expect(goalHost.createCount).toBe(1);
+  });
+});
+
+describe('supervisor · el gasto que no es de la mision', () => {
+  it('no le cobra a la mision el objetivo que la cadena no creo', async () => {
+    // El objetivo nativo que el usuario tiene en su sesion: completo, caro y
+    // ajeno a la cadena. Su gasto es del usuario, no de esta mision.
+    const host = new MemoryGoalHost();
+    host.current = aGoal({
+      goalId: 'tg_ajeno',
+      objective: 'trabajo del usuario en su sesion',
+      status: 'complete',
+      statusReason: 'complete(verifier_met)',
+      tokensUsed: 2_000_000,
+      turnsUsed: 40,
+    });
+
+    const mission = aMission({ totalTokenBudget: 600_000 });
+    const journal = new MemoryJournal(anEmptyJournal(mission));
+    const { supervisor } = build({ host, journal, candidates: [aCandidate()] });
+
+    await supervisor.run();
+
+    // No se registra como trabajo de la mision...
+    expect(journal.state.goals).toHaveLength(0);
+    // ...y el presupuesto sigue disponible, así que la cadena sigue.
+    expect(host.createCount).toBe(1);
+    expect(journal.state.mission.reason ?? '').not.toContain('presupuesto');
+  });
+
+  it('el objetivo que la cadena creo si se le cobra', async () => {
+    const host = new MemoryGoalHost();
+    const mission = aMission({ totalTokenBudget: 600_000 });
+    const journal = new MemoryJournal(anEmptyJournal(mission));
+    const { supervisor } = build({ host, journal, candidates: [aCandidate()] });
+
+    await supervisor.run();
+    // El objetivo recien creado es de la cadena, asi que su gasto cuenta.
+    expect(journal.state.intents[0]?.goalId).toBe(host.current?.goalId);
+    expect(journal.state.intents[0]?.status).toBe('committed');
   });
 });

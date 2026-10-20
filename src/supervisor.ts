@@ -250,10 +250,13 @@ export class Supervisor {
   ): Snapshot {
     // Un Goal ya terminado y registrado no se vuelve a sumar: contarlo dos
     // veces consumiria el presupuesto de la mision al doble de velocidad.
+    // Y el Goal en curso solo cuenta si lo creo la cadena: el objetivo
+    // nativo del usuario en su sesion no es gasto de esta mision.
     const recorded = new Set(journal.goals.map((record) => record.goalId));
+    const own = goal ? this.isOwnGoal(journal, goal.goalId) : false;
     const tokensUsedTotal =
       journal.goals.reduce((total, record) => total + record.tokensUsed, 0) +
-      (goal && !recorded.has(goal.goalId) ? goal.tokensUsed : 0);
+      (goal && own && !recorded.has(goal.goalId) ? goal.tokensUsed : 0);
 
     const progress = journal.progress;
     return {
@@ -313,7 +316,17 @@ export class Supervisor {
     if (!goal || goal.status !== 'complete') return;
     if (journal.goals.some((record) => record.goalId === goal.goalId)) return;
 
+    // Un objetivo que la cadena no creo no es trabajo de la mision: no se le
+    // cobra su presupuesto ni cuenta como candidato ya resuelto. El objetivo
+    // nativo que el usuario tenga en su sesion es suyo, y su gasto no es de
+    // esta mision. Sin esto, declarar una mision en una sesion que ya
+    // trabaja consume el presupuesto entero y la deja dormida al instante.
     const intent = journal.intents.find((entry) => entry.goalId === goal.goalId);
+    if (!intent) {
+      this.logger.info(`objetivo ajeno a la mision, no se contabiliza: ${goal.goalId}`);
+      return;
+    }
+
     const record: GoalRecord = {
       goalId: goal.goalId,
       objective: goal.objective,
@@ -323,8 +336,8 @@ export class Supervisor {
       turnsUsed: goal.turnsUsed,
       startedAt: goal.createdAt,
       endedAt: goal.updatedAt,
-      candidateId: intent?.candidateId,
-      candidateKey: intent?.candidateKey,
+      candidateId: intent.candidateId,
+      candidateKey: intent.candidateKey,
       receipt: goal.lastVerification?.reason?.slice(0, 200),
     };
     journal.goals.push(record);
@@ -333,6 +346,11 @@ export class Supervisor {
     this.logger.info(
       `goal completado registrado: ${goal.goalId} (${goal.statusReason ?? 'sin motivo'})`,
     );
+  }
+
+  /** Si el objetivo lo creo la cadena, segun las intenciones persistidas. */
+  private isOwnGoal(journal: Journal, goalId: string): boolean {
+    return journal.intents.some((intent) => intent.goalId === goalId);
   }
 
   /** Descarta los candidatos explorados que ya se han resuelto. */
