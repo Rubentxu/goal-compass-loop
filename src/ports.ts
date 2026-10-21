@@ -80,7 +80,24 @@ export interface JournalPort {
  */
 export interface ChainLockPort {
   /** Toma el candado y devuelve como soltarlo, o `null` si hay otra via. */
-  acquire(now?: number): (() => void) | null;
+  acquire(now?: number): ChainLockHandle | null;
+}
+
+/**
+ * El candado, con suelta y valla.
+ *
+ * Se suelta como una funcion, para que el contrato de siempre no cambie. Lo que
+ * anade son las dos preguntas que un candado mudo no sabe responder: si sigue
+ * siendo nuestro —y por tanto si su dueno puede escribir todavia— y si puede
+ * renovar la gracia mientras trabaja.
+ */
+export interface ChainLockHandle {
+  /** Suelta el candado. */
+  (): void;
+  /** Si el candado sigue siendo de este proceso. */
+  valid(): boolean;
+  /** Renueva el candado mientras siga siendo nuestro. */
+  renew(now?: number): void;
 }
 
 export interface Logger {

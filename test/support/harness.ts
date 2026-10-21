@@ -9,6 +9,7 @@
  * harness, de modo que lo que se comprueba en memoria y lo que se comprueba
  * contra el host real no pueden divergir en su modelo.
  */
+import type { ChainLockHandle } from '../../src/ports.js';
 import type {
   Candidate,
   GoalState,
@@ -239,4 +240,15 @@ export class MemoryControl {
   async read(): Promise<MissionStatus | null> {
     return this.status;
   }
+}
+
+/**
+ * Un candado de mentira que lo tiene todo el mundo: suelta, dice que es suyo y
+ * se renueva. Es lo que necesitan las pruebas que no van de propiedad.
+ */
+export function unCandado(): ChainLockHandle {
+  const candado = (() => {}) as ChainLockHandle;
+  candado.valid = () => true;
+  candado.renew = () => {};
+  return candado;
 }

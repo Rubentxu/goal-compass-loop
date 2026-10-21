@@ -10,6 +10,7 @@ import {
   aGoal,
   anEmptyJournal,
   aMission,
+  unCandado,
 } from './support/harness.js';
 
 const NOW = 1_700_000_000_000;
@@ -58,7 +59,7 @@ function build(
     goalPort: host,
     candidatePort: new StaticCandidates(options.candidates ?? []),
     journalPort: journal,
-    chainLock: { acquire: () => () => {} },
+    chainLock: { acquire: () => unCandado() },
     controlPort: control,
     clock: fixedClock,
     logger: silentLogger,

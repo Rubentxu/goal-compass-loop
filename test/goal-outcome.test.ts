@@ -19,6 +19,7 @@ import {
   aCandidate,
   aGoal,
   anEmptyJournal,
+  unCandado,
 } from './support/harness.js';
 
 const NOW = 1_700_000_000_000;
@@ -43,7 +44,7 @@ function construir(candidatos: Candidate[]): {
     goalPort: host,
     candidatePort: new StaticCandidates(candidatos),
     journalPort: journal,
-    chainLock: { acquire: () => () => {} },
+    chainLock: { acquire: () => unCandado() },
     controlPort: new MemoryControl(),
     clock: fixedClock,
     logger: silentLogger,

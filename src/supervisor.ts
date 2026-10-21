@@ -33,6 +33,7 @@ import {
 } from './core/types.js';
 import type {
   CandidatePort,
+  ChainLockHandle,
   ChainLockPort,
   Clock,
   ExplorationPort,
@@ -533,21 +534,26 @@ export class Supervisor {
    *
    * Devuelve el Goal confirmado, o `undefined` si no se pudo crear.
    */
+  /** Si la valla sigue siendo nuestra. Sin candado no hay nada que comprobar. */
+  private suyo(candado: ChainLockHandle | undefined): boolean {
+    return candado === undefined || candado.valid();
+  }
+
   private async executeCreate(candidate: Candidate): Promise<GoalState | undefined> {
     // Solo una via encadena a la vez. El cierre de turno del agente y el
     // sondeo del supervisor ven el objetivo terminado en el mismo instante:
     // sin este candado, los dos crearian el siguiente y uno se quedaria
     // huerfano con sus tokens gastados.
-    const release = this.chainLock.acquire(this.clock.now());
-    if (!release) {
+    const candado = this.chainLock.acquire(this.clock.now());
+    if (!candado) {
       this.logger.info('otra via esta encadenando trabajo: se espera al siguiente ciclo');
       return undefined;
     }
 
     try {
-      return await this.createGoal(candidate);
+      return await this.createGoal(candidate, {}, candado);
     } finally {
-      release();
+      candado();
     }
   }
   /**
@@ -563,8 +569,8 @@ export class Supervisor {
     candidateKey: string,
     tokenBudget: number,
   ): Promise<GoalState | undefined> {
-    const release = this.chainLock.acquire(this.clock.now());
-    if (!release) {
+    const candado = this.chainLock.acquire(this.clock.now());
+    if (!candado) {
       this.logger.info('otra via esta encadenando trabajo: se espera al siguiente ciclo');
       return undefined;
     }
@@ -585,9 +591,9 @@ export class Supervisor {
       this.logger.info(
         `objetivo liberado: se reintenta "${candidate.objective}" con ${tokenBudget} token(s)`,
       );
-      return await this.createGoal(candidate, { tokenBudget, candidateKey, retried: true });
+      return await this.createGoal(candidate, { tokenBudget, candidateKey, retried: true }, candado);
     } finally {
-      release();
+      candado();
     }
   }
 
@@ -595,7 +601,16 @@ export class Supervisor {
   private async createGoal(
     candidate: Candidate,
     options: { tokenBudget?: number; candidateKey?: string; retried?: boolean } = {},
+    candado?: ChainLockHandle,
   ): Promise<GoalState | undefined> {
+    // La valla se consulta justo antes de escribir, no al principio: entre una
+    // cosa y otra esta la llamada al host, que es justo donde el candado se
+    // puede perder. Un ejecutor que ya no lo tiene se retira sin tocar nada.
+    if (!this.suyo(candado)) {
+      this.logger.warn('el candado ya no es nuestro: no se escribe nada');
+      return undefined;
+    }
+
     const journal = await this.loadJournal();
     const sessionId = this.goalPort.sessionId();
 
@@ -652,6 +667,13 @@ export class Supervisor {
 
     const readBack = await this.goalPort.read(sessionId);
     const confirmed = readBack?.goalId === created.goalId ? readBack : created;
+
+    if (!this.suyo(candado)) {
+      this.logger.warn(
+        `el candado se perdio durante la creacion: la intencion ${intent.intentId} queda sin confirmar`,
+      );
+      return confirmed;
+    }
 
     this.commitIntent(journal, intent.intentId, confirmed.goalId);
     await this.saveJournal(journal);
