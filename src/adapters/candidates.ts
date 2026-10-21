@@ -5,6 +5,7 @@
  * detalle de adaptacion. La composicion permite combinar un backlog curado
  * con lo que se descubre en el workspace sin tocar el nucleo.
  */
+import { dirname } from 'node:path';
 import { loadMissionConfig } from './mission.js';
 import { WorkspaceEvidenceScanner, type Evidence } from './discovery.js';
 import { completedObjectives, isCompleted, type CompletedObjectives } from './ledger.js';
@@ -29,7 +30,14 @@ export class MissionConfigCandidatePort implements CandidatePort {
 
   async discover(mission: Mission, _previousGoal: GoalState | null): Promise<Candidate[]> {
     try {
-      const config = loadMissionConfig(this.configPath);
+      // El workspace se toma del sitio donde vive la declaracion, igual que
+      // hace el localizador de mision. Sin el, la carga lanza porque el
+      // fichero no lo declara, el error se comia y el puerto caia al backlog
+      // guardado en el journal: la copia congelada, que es justo lo que deja
+      // de ver el trabajo nuevo.
+      const config = loadMissionConfig(this.configPath, {
+        workspace: dirname(this.configPath),
+      });
       if (config.backlog.length > 0) {
         return config.backlog.filter(
           (candidate) => !isCompleted(this.completed, candidate.objective),

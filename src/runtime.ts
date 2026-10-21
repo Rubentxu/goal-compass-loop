@@ -21,6 +21,7 @@ import { SessionExploration } from './adapters/exploration.js';
 import { ChainLock, decideDriving } from './adapters/ownership.js';
 import { ProposalCandidatePort } from './adapters/proposals.js';
 import { completedObjectives, type CompletedObjectives } from './adapters/ledger.js';
+import { reconcileMission } from './core/decide.js';
 import { emptyMetrics, normalizeJournal, type Driver, type Journal } from './core/types.js';
 import type { CandidatePort, GoalAdapter, Logger } from './ports.js';
 import { Supervisor, type HostObjectiveContext } from './supervisor.js';
@@ -155,7 +156,11 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
   // completa al leerlo: el estado viejo sigue siendo utilizable.
   const stored = await journal.load();
   const existing = stored ? normalizeJournal(stored) : null;
-  const mission = existing?.mission ?? toMission(config);
+  // La intencion la trae la declaracion; el estado, el journal. Sin conciliarlos,
+  // el backlog que se guardo al crear el journal manda para siempre y anadir o
+  // repriorizar trabajo no llega a encadenarse.
+  const declared = toMission(config);
+  const mission = existing ? reconcileMission(declared, existing.mission) : declared;
 
   // El estado durable vive fuera del repositorio, en una carpeta que se nombra
   // con el identificador de la mision. Dos proyectos que compartan
