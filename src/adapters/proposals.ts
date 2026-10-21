@@ -17,6 +17,7 @@ import { existsSync } from 'node:fs';
 import { candidateKey, type Candidate } from '../core/types.js';
 import { candidateDefect, type CandidateDefect } from '../core/decide.js';
 import type { CandidatePort } from '../ports.js';
+import { isCompleted, workspaceCompletedObjectives, type CompletedObjectives } from './ledger.js';
 import { stateRoot } from './journal.js';
 
 /** Propuesta pendiente de encadenar. */
@@ -93,10 +94,19 @@ export interface ProposalVerdict {
  *
  * La evidencia tiene que existir de verdad y hace falta un criterio de cierre
  * observable: son las mismas condiciones que el nucleo exige a cualquier
- * candidato, no un filtro propio de este canal.
+ * candidato, no un filtro propio de este canal. A eso se suma el historial: una
+ * propuesta cuyo trabajo ya se ejecutó no vuelve a ofrecerse, porque el
+ * objetivo de una propuesta es trabajo nuevo.
  */
-export function reviewProposals(missionId: string, workspace: string): ProposalVerdict[] {
+export function reviewProposals(
+  missionId: string,
+  workspace: string,
+  completed: CompletedObjectives = workspaceCompletedObjectives(workspace),
+): ProposalVerdict[] {
   return readProposals(missionId).map((proposal) => {
+    if (isCompleted(completed, proposal.objective)) {
+      return { proposal, defect: 'ya-completado' as const };
+    }
     if (!evidenceExists(workspace, proposal.evidenceRefs)) {
       return { proposal, defect: 'sin-evidencia' as const };
     }
@@ -124,8 +134,9 @@ function proposalToCandidate(proposal: Proposal): Candidate {
 export function proposalsToCandidates(
   missionId: string,
   workspace: string,
+  completed: CompletedObjectives = workspaceCompletedObjectives(workspace),
 ): Candidate[] {
-  return reviewProposals(missionId, workspace)
+  return reviewProposals(missionId, workspace, completed)
     .filter((verdict) => verdict.defect === null)
     .map((verdict) => proposalToCandidate(verdict.proposal));
 }
@@ -136,12 +147,22 @@ export function proposalsToCandidates(
  * Va despues del backlog declarado por el usuario, que manda, y antes de las
  * señales automaticas del repositorio, porque una propuesta ya viene
  * investigada y con su evidencia puesta.
+ *
+ * Lo ya ejecutado no se ofrece: una propuesta es trabajo futuro, y repetir un
+ * trabajo pagado es la forma mas cara de perder un ciclo.
  */
 export class ProposalCandidatePort implements CandidatePort {
-  constructor(private readonly workspace: string) {}
+  private readonly completed: CompletedObjectives;
+
+  constructor(
+    private readonly workspace: string,
+    completed?: CompletedObjectives,
+  ) {
+    this.completed = completed ?? workspaceCompletedObjectives(workspace);
+  }
 
   async discover(mission: { missionId: string }): Promise<Candidate[]> {
-    return proposalsToCandidates(mission.missionId, this.workspace);
+    return proposalsToCandidates(mission.missionId, this.workspace, this.completed);
   }
 }
 

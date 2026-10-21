@@ -34,8 +34,14 @@ export interface Rejection {
  * evidencia o sin criterio de cierre no es trabajo, hoy ni nunca. El nucleo
  * las aplica al decidir, y las fuentes de trabajo las comprueban antes de
  * ofrecer un candidato, para no prometer trabajo que luego se descarta.
+ *
+ * La tercera, `ya-completado`, depende del historial: es la que impide
+ * ofrecer otra vez un trabajo que ya está pagado.
  */
-export type CandidateDefect = 'sin-evidencia' | 'sin-criterio-observable';
+export type CandidateDefect =
+  | 'sin-evidencia'
+  | 'sin-criterio-observable'
+  | 'ya-completado';
 
 /**
  * Comprueba si un candidato cumple las condiciones minimas para ser trabajo.

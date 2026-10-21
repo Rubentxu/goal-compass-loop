@@ -26,6 +26,8 @@ import {
   reviewProposals,
   writeProposal,
 } from '../adapters/proposals.js';
+import { completedObjectives, isCompleted } from '../adapters/ledger.js';
+import { normalize, type Journal } from '../core/types.js';
 import { locateMission, type LocatedMission } from './mission-locator.js';
 import type { Logger } from '../ports.js';
 
@@ -45,6 +47,23 @@ export interface MissionToolsOptions {
   logger: Logger;
   /** Reloj, inyectado para que las pruebas no dependan del reloj real. */
   now?: () => number;
+}
+
+/**
+ * El trabajo que ya está hecho: lo que dice el ledger del workspace y lo que
+ * la cadena ya encadenó.
+ *
+ * Son dos fuentes porque son dos hechos distintos: el ledger es la memoria del
+ * proyecto y el estado interno es la memoria de la cadena. Ninguna de las dos
+ * basta sola, y ofrecer trabajo ya pagado es la forma más cara de perder un
+ * ciclo.
+ */
+function completedWork(missionPath: string, state: Journal | null): Set<string> {
+  const completed = new Set(completedObjectives(missionPath));
+  for (const intent of state?.intents ?? []) {
+    if (intent.status === 'committed') completed.add(normalize(intent.objective));
+  }
+  return completed;
 }
 
 /** Herramientas de la misión, listas para el protocolo. */
@@ -137,8 +156,12 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
         const journal = new FileJournal(mission.config.missionId);
         const state = await journal.load();
 
+        const completed = completedWork(mission.configPath, state);
+
         const composed = new ComposedCandidatePort(
-          buildCandidatePorts(mission.configPath, mission.workspace),
+          buildCandidatePorts(mission.configPath, mission.workspace, {
+            completedObjectives: completed,
+          }),
         );
         const available = await composed.discover(state?.mission ?? toMission(mission.config), null);
 
@@ -153,9 +176,10 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
               'Estado: declarada, todavía sin empezar. La cadena arranca sola en el primer cierre de turno.',
             ];
 
-        const verdicts = reviewProposals(mission.config.missionId, mission.workspace);
+        const verdicts = reviewProposals(mission.config.missionId, mission.workspace, completed);
         const usable = verdicts.filter((verdict) => verdict.defect === null);
         const discarded = verdicts.filter((verdict) => verdict.defect !== null);
+        lines.push(`Objetivos ya ejecutados: ${completed.size}`);
         lines.push(`Propuestas utilizables: ${usable.length}`);
         for (const verdict of discarded) {
           lines.push(`- descartada: ${verdict.proposal.objective} (${verdict.defect})`);
@@ -221,6 +245,17 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
           return (
             `La evidencia "${evidence}" no señala a ningún fichero del workspace. ` +
             'Una propuesta sin fichero real no es trabajo.'
+          );
+        }
+
+        const journal = new FileJournal(mission.config.missionId);
+        const state = await journal.load();
+        const completed = completedWork(mission.configPath, state);
+        if (isCompleted(completed, objective)) {
+          return (
+            'Ese trabajo ya está ejecutado, así que no se registra como propuesta: ' +
+            'una propuesta es trabajo futuro y repetir lo ya pagado pierde el ciclo. ' +
+            `Ya ejecutados: ${completed.size}.`
           );
         }
 
