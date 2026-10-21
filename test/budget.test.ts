@@ -246,6 +246,32 @@ describe('supervisor · el trabajo agotado vuelve a la cola', () => {
     expect(created.objective).toContain('Criterio de cierre:');
   });
 
+  it('el reintento reconstruye el trabajo desde el journal si ya no esta en la cola', async () => {
+    // Entre el intento y el reintento el trabajo puede desaparecer de la cola:
+    // se reordena el backlog, se cierra, se reescribe. El reintento tiene que
+    // seguir siendo *el mismo* trabajo, con su evidencia y su criterio, y no uno
+    // parecido que se parece en el titulo. Lo unico que queda de el es lo que
+    // quedo escrito, asi que de ahi tiene que salir entero.
+    const host = hostWithExhaustedGoal(candidate);
+    const journal = journalWithExhaustedGoal(candidate);
+    const supervisor = build(host, journal, []);
+
+    const outcome = await supervisor.step();
+
+    expect(outcome.decision.kind).toBe('retry');
+
+    const created = host.current as GoalState;
+    expect(created.objective).toContain(candidate.objective);
+    expect(created.objective).toContain('Evidencia: docs/triage.md#parseo');
+    expect(created.objective).toContain('Criterio de cierre:');
+    expect(created.objective).toContain('La prueba que fallaba pasa');
+
+    // Y la intencion nueva deja constancia de donde se saco, para el siguiente.
+    const committed = journal.state.intents.filter((intent) => intent.status === 'committed');
+    expect(committed[1]?.evidenceRefs).toEqual(candidate.evidenceRefs);
+    expect(committed[1]?.doneWhen).toEqual(candidate.doneWhen);
+  });
+
   it('el segundo intento agotado vuelve a la cola con el doble que el anterior', async () => {
     // El primer intento se quedo con 120k, este es el segundo (240k): el
     // siguiente se lleva 480k.
