@@ -24,6 +24,7 @@ import { openMission } from '../runtime.js';
 import { locateMission } from './mission-locator.js';
 import { keeperSocketPath } from './keeper-protocol.js';
 import { parseHookEvent, type HookEvent } from './hook-event.js';
+import { readStdinPayload, STDIN_READ_DEADLINE_MS } from './stdin-payload.js';
 import type { GoalAdapter, Logger } from '../ports.js';
 import type { Journal } from '../core/types.js';
 
@@ -332,10 +333,22 @@ function readNumber(name: string): number | undefined {
 
 /** Punto de entrada: el host ejecuta este fichero y lee su salida. */
 async function main(): Promise<void> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
-  const raw = Buffer.concat(chunks).toString('utf8');
+  // El margen del host es para TODO el hook: leer la carga y hacer el
+  // trabajo. La lectura se lleva su parte y el trabajo se queda con el
+  // resto, para que la suma no se pase nunca del limite.
+  const startedAt = Date.now();
+  let raw: string;
+  try {
+    raw = await readStdinPayload(STDIN_READ_DEADLINE_MS);
+  } catch (err) {
+    // Sin carga no hay nada que encadenar, y no es motivo para que el host
+    // espere a su propio limite.
+    logger.error(String(err));
+    process.exit(0);
+  }
+  const remainingMs = Math.max(0, DEADLINE_MS - (Date.now() - startedAt));
   const output = await runAutoContinue(raw, {
+    deadlineMs: remainingMs,
     ...readNumber('GOAL_COMPASS_REQUEST_TIMEOUT_MS')
       ? { requestTimeoutMs: readNumber('GOAL_COMPASS_REQUEST_TIMEOUT_MS')! }
       : {},

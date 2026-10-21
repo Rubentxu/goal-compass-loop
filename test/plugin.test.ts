@@ -33,11 +33,16 @@ const quietLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
  * Es la unica forma de comprobar lo que de verdad importa del hook: que
  * termina. Un hook que no termina hace que el host espere a su propio limite
  * y tire la continuacion preparada.
+ *
+ * `closeStdin` reproduce las DOS formas del host: la que cierra la entrada
+ * despues de escribir, y la que la deja abierta. La segunda es la que hace el
+ * host de verdad, y es la que hacia que el hook se quedara mudo.
  */
 function runHookProcess(
   workspace: string,
   binDir: string,
   env: Record<string, string>,
+  closeStdin = true,
 ): Promise<{ code: number | null; elapsed: number; out: string }> {
   return new Promise((resolve, reject) => {
     const started = Date.now();
@@ -74,7 +79,7 @@ function runHookProcess(
     child.stdin.write(
       `${JSON.stringify({ hook_event_name: 'Stop', session_id: 'mvs_fake', cwd: workspace })}\n`,
     );
-    child.stdin.end();
+    if (closeStdin) child.stdin.end();
   });
 }
 
@@ -360,6 +365,20 @@ describe('el hook como proceso', () => {
     const { code, elapsed } = await runHookProcess(workspace, mudo, {
       GOAL_COMPASS_REQUEST_TIMEOUT_MS: '2000',
     });
+
+    expect(code).toBe(0);
+    expect(elapsed).toBeLessThan(20_000);
+  });
+
+  it('termina aunque el host NO cierre la entrada', async () => {
+    // El host escribe la carga y la deja ABIERTA: no espera al fin de la
+    // entrada. Un hook que lee hasta el fin se queda mudo, el host lo mata a
+    // los diez segundos y el turno se queda sin continuacion.
+    //
+    // Este test reproduce esa forma del host, que el resto de los tests NO
+    // reproducen porque cierran la entrada ellos mismos: por eso pasaban en
+    // verde mientras el hook de verdad no contestaba nunca.
+    const { code, elapsed } = await runHookProcess(workspace, binDir, {}, false);
 
     expect(code).toBe(0);
     expect(elapsed).toBeLessThan(20_000);
