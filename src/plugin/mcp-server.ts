@@ -288,7 +288,9 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
     },
     {
       name: 'mission_resume',
-      description: 'Reanuda una misión pausada o dormida.',
+      description:
+        'Reanuda una misión pausada o dormida. Devuelve a la cadena el objetivo vivo que habia quedado en pausa, ' +
+        'que es la salida cuando el runtime rechaza cerrar por que el objetivo esta pausado.',
       inputSchema: { type: 'object', properties: {} },
       async run(): Promise<string> {
         return await order('running', locate, 'reanudada');

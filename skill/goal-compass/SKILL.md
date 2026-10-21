@@ -81,7 +81,10 @@ La prioridad va de mayor a menor: más alto, antes.
 5. Para apoyarte en otras skills del catálogo, descubre la lista disponible y lee su `SKILL.md` real. Usa skills que el modelo pueda invocar **solo cuando el entorno lo permita**; si requieren que el usuario las lance, sugiere el comando exacto y sigue con un paso local. Nunca digas que ejecutaste una skill que no ejecutaste.
 6. Cierra el Goal particular con `finish` cuando se pruebe su alcance, o `stop` si está bloqueado. **NO cierres por ello la Mission.**
 7. Al usar `update_goal(status=complete)`, deja de ejecutar herramientas y da la respuesta final según exige MCode. Nunca inventes resultados, no saltes permisos, no hagas push/releases/despliegues sin autorización explícita, y no crees un harness de pruebas pesado.
-8. Al cerrar un objetivo, **deja el trabajo siguiente** con `mission_propose`: la
+8. Si `update_goal` te rechaza, **es el runtime y no hay nada que arreglar**. Dos rechazos, y ninguno se abre desde la herramienta:
+   - *El turno no está ligado al objetivo.* Cierra solo funciona desde el turno que abrió el objetivo. Un turno que abrió otra persona —el usuario escribió mientras el objetivo seguía vivo— no está ligado a él. **No busques el mecanismo**: la puerta está en el host, no en este plugin, y revisarlo a mano no la abre. Termina el turno con lo que tengas y deja que la cadena te devuelva el control.
+   - *El objetivo está pausado.* Llama a `mission_resume`, que lo revive.
+9. Al cerrar un objetivo, **deja el trabajo siguiente** con `mission_propose`: la
    evidencia que lo respalda y cómo se sabrá que está hecho. Sin eso la cadena
    se queda sin combustible en cuanto la cola se vacía, aunque la misión siga
    viva. Si de verdad no queda trabajo, dilo con claridad en vez de inventarlo.

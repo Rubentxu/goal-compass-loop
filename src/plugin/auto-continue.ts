@@ -253,6 +253,8 @@ function objectiveAddon(
       'pequena y verificable. Cuando su alcance este probado, cierralo con ' +
       'update_goal(status=complete).',
     '',
+    closingRule(),
+    '',
     'Cuando termines, deja el trabajo siguiente: con mission_propose, la evidencia ' +
       'que lo respalda y como se sabra que esta hecho. Si de verdad no hay trabajo ' +
       'que quede, dilo con claridad en vez de inventarlo. La cadena sigue mientras ' +
@@ -264,6 +266,32 @@ function objectiveAddon(
   );
 
   return lines;
+}
+
+/**
+ * Cuando cerrar el objetivo es posible, y que hacer cuando no lo es.
+ *
+ * Cerrar solo funciona desde el turno que abrio el objetivo. Un turno que
+ * abrio otra persona —el usuario escribio mientras el objetivo seguia vivo— no
+ * esta ligado a el, y el runtime lo dice. Esa respuesta no es un fallo que
+ * arreglar: no hay nada que arreglar aqui, porque la puerta no esta en este
+ * plugin sino en el host, y revisarlo a mano no la abre. Lo que corresponde es
+ * terminar el turno y dejar que la cadena devuelva el control, que es lo que
+ * hace por su cuenta.
+ *
+ * Se dice de forma explicita porque el mensaje de rechazo menciona el vinculo
+ * de turno, y eso invita a buscar el vinculo, y esa busqueda ya ha costado
+ * media hora de llamadas.
+ */
+function closingRule(): string {
+  return [
+    'Cerrar el objetivo tiene una regla que conviene saber antes de necesitarla:',
+    '- update_goal solo responde en el turno que abrio este objetivo.',
+    '- Si el runtime lo rechaza diciendo que el turno no esta ligado al objetivo,',
+    '  no busques el mecanismo ni lo repares: no esta en este plugin. Termina el',
+    '  turno con lo que tengas y deja que la cadena te devuelva el control.',
+    '- Si ademas dice que el objetivo esta pausado, mission_resume lo revive.',
+  ].join(' ');
 }
 
 /**

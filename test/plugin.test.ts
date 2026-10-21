@@ -195,6 +195,22 @@ describe('hook de continuacion', () => {
     expect(objetivo).toContain('deja el trabajo siguiente');
   });
 
+  it('el objetivo explica que cerrar tiene un turno y que hacer si no lo tiene', async () => {
+    // Cerrar solo responde en el turno que abrio el objetivo. Cuando no es ese,
+    // el runtime lo dice y el mensaje menciona el vinculo de turno, que invita
+    // a buscar ese vinculo por dentro del host. Ahi no hay nada que arreglar, y
+    // saberlo antes es la diferencia entre un turno y media hora de llamadas.
+    await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }), {
+      host: HOST,
+      logger: quietLogger,
+    });
+    const objetivo = objetivoDelHost();
+    expect(objetivo).toContain('update_goal solo responde en el turno');
+    expect(objetivo).toContain('no esta ligado al objetivo');
+    expect(objetivo).toContain('no busques el mecanismo');
+    expect(objetivo).toContain('mission_resume');
+  });
+
   it('el objetivo nombra la evidencia y el criterio de cierre', async () => {
     await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }), {
       host: HOST,
