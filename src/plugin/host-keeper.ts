@@ -39,6 +39,17 @@ const MAX_ATTEMPTS = 5;
  */
 const GOAL_READ_TIMEOUT_MS = 400;
 
+/**
+ * Cuanto se puede servir lo que ya se sabe antes de volver a preguntarlo.
+ *
+ * El aviso de cambio del host es lo que mantiene el estado al dia, pero un
+ * aviso que se pierde lo deja congelado. Con este tope, aunque no llegue ni un
+ * aviso, la lectura siguiente a este plazo ya sale comprobada. Es menor que el
+ * sondeo del supervisor para que un ciclo de trabajo nunca se guie por un dato
+ * con mas de una vuelta de antiguedad.
+ */
+const GOAL_FRESH_MS = 10_000;
+
 /** Espera entre intentos de cargar la sesion. */
 const RETRY_DELAY_MS = 1_000;
 
@@ -54,6 +65,11 @@ const MAX_LIFETIME_MS = 6 * 60 * 60_000;
  * se demuestra con un segundo. Con la variable se demuestra lo mismo pagando la
  * decima parte. En produccion, sin la variable, los valores son los de arriba.
  */
+/** Tope de una pregunta al host, con el margen que se le quiera dar. */
+function readTimeoutMs(): number {
+  return readNumber('GOAL_COMPASS_KEEPER_READ_MS') ?? GOAL_READ_TIMEOUT_MS;
+}
+
 function readNumber(name: string): number | undefined {
   const raw = process.env[name];
   if (!raw || !raw.trim()) return undefined;
@@ -100,6 +116,46 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
    * crear un objetivo que ya existe.
    */
   let cachedGoal: GoalState | null | undefined;
+  /** Cuando se comprobo por ultima vez lo que hay en el cache. */
+  let cachedAt = 0;
+  /** Hay una comprobacion en marcha: no se apilan. */
+  let revalidating = false;
+
+  /** Guarda un estado del objetivo y da por buena su antiguedad. */
+  const remember = (goal: GoalState | null | undefined): void => {
+    cachedGoal = goal;
+    cachedAt = Date.now();
+  };
+
+  /**
+   * Vuelve a preguntar al host por el objetivo sin hacer esperar a quien lee.
+   *
+   * Un aviso de cambio que se pierde deja el estado congelado para siempre, y
+   * entonces la cadena sigue viendo un objetivo que en realidad lleva rato
+   * trabajando: decide sobre una verdad vieja y apaga trabajo que si avanza.
+   * Preguntar en linea devolveria el margen del hook a un host que esta
+   * ocupado, asi que la pregunta va por detras. Quien lee no espera — sale con
+   * lo que ya se sabe— y la lectura siguiente ya sale al dia.
+   */
+  const revalidate = (): void => {
+    if (revalidating) return;
+    const maxAge = readNumber('GOAL_COMPASS_KEEPER_FRESH_MS') ?? GOAL_FRESH_MS;
+    if (Date.now() - cachedAt < maxAge) return;
+
+    const current = adapter;
+    if (!current || !ready) return;
+
+    revalidating = true;
+    void withTimeout(current.read(sessionId), readTimeoutMs())
+      .then((goal) => remember(goal))
+      .catch(() => {
+        // El host sigue ocupado: no es un fallo, es lo de siempre. El cache
+        // sigue sirviendo lo que sabe y la proxima lectura lo intentara otra vez.
+      })
+      .finally(() => {
+        revalidating = false;
+      });
+  };
 
   const build = (): AcpGoalAdapter =>
     new AcpGoalAdapter({
@@ -111,7 +167,7 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
       // es lo que se queda colgado mientras el host esta ocupado.
       onGoalUpdate: (event) => {
         if (event.sessionId !== sessionId) return;
-        cachedGoal = event.goal ?? null;
+        remember(event.goal ?? null);
       },
       ...(options.host?.command !== undefined ? { command: options.host.command } : {}),
       ...(options.host?.args !== undefined ? { args: options.host.args } : {}),
@@ -135,7 +191,7 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
         failure = undefined;
         // Aqui el host esta libre: es el momento de preguntar cual es el
         // objetivo. A partir de aqui manda el aviso de cambio.
-        cachedGoal = await candidate.read(sessionId).catch(() => undefined);
+        remember(await candidate.read(sessionId).catch(() => undefined));
         logger.info(`sesion cargada en el proceso vivo: ${sessionId}`);
         return;
       } catch (err) {
@@ -182,9 +238,8 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
       isReady: () => ready,
       failure: () => failure,
       goal: () => cachedGoal,
-      setGoal: (goal: GoalState | null | undefined) => {
-        cachedGoal = goal;
-      },
+      setGoal: remember,
+      revalidate,
       shutdown,
     });
   });
@@ -293,6 +348,8 @@ interface ConnectionContext {
   goal: () => GoalState | null | undefined;
   /** Guarda el estado del objetivo que acaba de preguntarse al host. */
   setGoal: (goal: GoalState | null | undefined) => void;
+  /** Pide al host una comprobacion en segundo plano si lo que hay envejecio. */
+  revalidate: () => void;
   shutdown: () => Promise<void>;
 }
 
@@ -381,16 +438,16 @@ async function serveOnHost(
       // ocupado esperando al hook. El proceso vivo ya sabe cual es el
       // objetivo, asi que se responde con lo que sabe.
       const cached = context.goal();
-      if (cached !== undefined) return { ok: true, goal: cached };
+      if (cached !== undefined) {
+        context.revalidate();
+        return { ok: true, goal: cached };
+      }
       // Aun no se sabe: se pregunta, pero con un tope corto. Si el host no
       // contesta, se responde con un error y no con "no hay objetivo": callar
       // seria afirmar algo que no se sabe, y podria crear un objetivo que ya
       // existe.
       try {
-        const goal = await withTimeout(
-          adapter.read(sessionId),
-          readNumber('GOAL_COMPASS_KEEPER_READ_MS') ?? GOAL_READ_TIMEOUT_MS,
-        );
+        const goal = await withTimeout(adapter.read(sessionId), readTimeoutMs());
         context.setGoal(goal);
         return { ok: true, goal };
       } catch (err) {

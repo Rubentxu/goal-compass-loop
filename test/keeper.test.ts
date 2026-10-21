@@ -179,6 +179,49 @@ describe('proceso vivo', () => {
     await adapter.close();
   }, 20_000);
 
+  it('el objetivo que cambia fuera se ve igual sin avisar', async () => {
+    // El aviso de cambio se pierde y el objetivo se reanuda en el host: lo que
+    // hay guardado sigue diciendo "pausado" mientras el real ya es "activo".
+    // Servir solo lo guardado congelaria la cadena sobre una verdad vieja y para
+    // siempre — decide que el objetivo esta parado cuando lo unico que se sabe
+    // es que hace rato que no se pregunta.
+    const sessionId = 'mvs_vivo';
+    const socketPath = startKeeper(sessionId, {
+      FAKE_ACP_SEED_GOAL: 'paused',
+      FAKE_ACP_DRIFT_AFTER_MS: '400',
+      FAKE_ACP_DRIFT_STATUS: 'active',
+      GOAL_COMPASS_KEEPER_FRESH_MS: '150',
+      GOAL_COMPASS_KEEPER_READ_MS: '2000',
+    });
+    expect(await waitFor(() => existsSync(socketPath))).toBe(true);
+
+    const adapter = new KeeperGoalAdapter({
+      sessionId,
+      socketPath,
+      logger: quietLogger,
+      requestTimeoutMs: 5_000,
+    });
+    await adapter.start();
+
+    // Se espera a que el host haya cambiado el objetivo por su cuenta.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+
+    // La lectura no espera al host: sale con lo que ya se sabe.
+    const antes = await adapter.read(sessionId);
+    expect(antes?.status).toBe('paused');
+
+    // Y a la vuelta siguiente ya sale al dia, sin que nadie lo pidiera.
+    let despues = antes;
+    const limite = Date.now() + 5_000;
+    while (despues?.status !== 'active' && Date.now() < limite) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      despues = await adapter.read(sessionId);
+    }
+    expect(despues?.status).toBe('active');
+
+    await adapter.close();
+  }, 20_000);
+
   it('el objetivo recien creado se lee al instante, sin esperar al aviso de cambio', async () => {
     // El aviso de cambio del host llega despues de crear. Hasta que llega,
     // leer tiene que dar el objetivo nuevo: dar el anterior —que ademas

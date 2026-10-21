@@ -31,6 +31,8 @@ const seedStatus = process.env.FAKE_ACP_SEED_GOAL ?? '';
 const seedId = process.env.FAKE_ACP_SEED_ID ?? 'tg_fake_1';
 const seedBudget = Number(process.env.FAKE_ACP_SEED_BUDGET ?? 0);
 const freezeAfterMs = Number(process.env.FAKE_ACP_FREEZE_AFTER_MS ?? 0);
+const driftAfterMs = Number(process.env.FAKE_ACP_DRIFT_AFTER_MS ?? 0);
+const driftStatus = process.env.FAKE_ACP_DRIFT_STATUS ?? 'active';
 const startedAt = Date.now();
 
 let counter = 0;
@@ -67,6 +69,12 @@ function seedGoal(sessionId) {
   // El objetivo sembrado ocupa el primer identificador: los que se creen
   // despues no pueden repetirlo.
   counter = Math.max(counter, 1);
+
+  // El plazo del cambio cuenta desde que el objetivo existe, para que la
+  // prueba sepa que ya ha ocurrido al pedir el siguiente estado.
+  if (driftAfterMs > 0) {
+    setTimeout(() => driftGoal(sessionId), driftAfterMs);
+  }
 }
 
 function goal(sessionId, objective, tokenBudget) {
@@ -89,6 +97,19 @@ function goal(sessionId, objective, tokenBudget) {
   if (tokenBudget !== undefined) goal.tokenBudget = tokenBudget;
   goals.set(sessionId, goal);
   return goal;
+}
+
+/**
+ * Cambia el objetivo por su cuenta y sin avisar.
+ *
+ * Es lo que pasa cuando alguien reanuda el objetivo desde el host y el aviso
+ * de cambio no llega: el objetivo real ya es otro y quien lo tiene guardado
+ * sigue con lo que vio la ultima vez.
+ */
+function driftGoal(sessionId) {
+  const current = goals.get(sessionId);
+  if (!current) return;
+  current.status = driftStatus;
 }
 
 const input = createInterface({ input: process.stdin });
