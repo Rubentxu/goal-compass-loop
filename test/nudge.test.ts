@@ -9,7 +9,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_NUDGE_COOLDOWN_MS, DEFAULT_NUDGE_STALL_MS, decideNudge } from '../src/core/nudge.js';
-import type { MissionStatus } from '../src/core/types.js';
+import { normalizeJournal, type MissionStatus } from '../src/core/types.js';
+import { aCandidate, aMission, anEmptyJournal } from './support/harness.js';
 
 const AHORA = 1_700_000_000_000;
 const HACE_UN_MINUTO = AHORA - 60_000;
@@ -100,5 +101,29 @@ describe('cuando la sesion necesita que le empurren', () => {
   it('el umbral por defecto son diez minutos sin cambiar nada', () => {
     expect(DEFAULT_NUDGE_STALL_MS).toBe(10 * 60_000);
     expect(DEFAULT_NUDGE_COOLDOWN_MS).toBeGreaterThan(DEFAULT_NUDGE_STALL_MS);
+  });
+});
+describe('un journal de antes se puede mirar igual que uno de ahora', () => {
+  it('un backlog viejo sin lista de prerrequisitos se completa al leerlo', () => {
+    // Los journals llevan tiempo guardados y sus candidatos son de la epoca en
+    // que se escribieron. La lista de prerrequisitos se anadio despues, asi que
+    // un backlog viejo no la trae, y quien lo recorra revienta al filtrarla en
+    // vez de limitarse a no ver nada.
+    const viejo = {
+      ...anEmptyJournal(aMission({ backlog: [{ ...aCandidate(), prerequisites: undefined } as never] })),
+      explored: [{ ...aCandidate({ candidateId: 'x' }), prerequisites: undefined } as never],
+    };
+
+    const leido = normalizeJournal(viejo);
+
+    expect(leido.mission.backlog[0]?.prerequisites).toEqual([]);
+    expect(leido.explored[0]?.prerequisites).toEqual([]);
+  });
+
+  it('no borra lo que el backlog ya traia', () => {
+    const mio = aCandidate({ prerequisites: ['otro'], evidenceRefs: ['a.md'], doneWhen: ['hecho'] });
+    const leido = normalizeJournal(anEmptyJournal(aMission({ backlog: [mio] })));
+
+    expect(leido.mission.backlog[0]).toEqual(mio);
   });
 });

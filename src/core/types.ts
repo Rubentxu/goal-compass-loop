@@ -394,7 +394,23 @@ export function normalizeJournal(journal: Journal): Journal {
   };
   loose.budgetAttempts ??= [];
   loose.metrics = { ...emptyMetrics(), ...(loose.metrics ?? {}) };
+  // Los candidatos tambien son de cuando se escribieron. La lista de
+  // prerrequisitos se anadio despues, y un backlog viejo se queda sin ella:
+  // quien lo recorra se encuentra un `undefined` donde esperaba una lista y
+  // revienta al filtrar. Lo que falte se pone ahi, no en quien lo lee.
+  journal.mission.backlog = journal.mission.backlog.map(completarCandidato);
+  journal.explored = (journal.explored ?? []).map(completarCandidato);
   return journal;
+}
+
+/** Le pone a un candidato de cualquier epoca lo que le falte para poder leerse. */
+function completarCandidato(candidate: Candidate): Candidate {
+  return {
+    ...candidate,
+    prerequisites: candidate.prerequisites ?? [],
+    evidenceRefs: candidate.evidenceRefs ?? [],
+    doneWhen: candidate.doneWhen ?? [],
+  };
 }
 
 /**

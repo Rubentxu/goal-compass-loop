@@ -7,12 +7,12 @@
  * pause o continue. La orden del usuario viaja por un canal de control
  * separado del journal, de modo que nunca se pisa el estado de ejecucion.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { AcpGoalAdapter } from './adapters/acp-goal.js';
 import { FileControlPort } from './adapters/control.js';
 import { FileJournal, journalPath, stateRoot } from './adapters/journal.js';
@@ -30,7 +30,7 @@ import {
   projectRootFromModule,
 } from './plugin/install.js';
 import { selectCandidates } from './core/decide.js';
-import type { Candidate, Journal, MissionStatus } from './core/types.js';
+import { normalizeJournal, type Candidate, type Journal, type MissionStatus } from './core/types.js';
 import { DEFAULT_NUDGE_COOLDOWN_MS, DEFAULT_NUDGE_STALL_MS, decideNudge } from './core/nudge.js';
 
 const logger = {
@@ -51,7 +51,7 @@ const USAGE = `Goal Compass Loop · supervisor de Goals nativos
   goal-compass run    --config <mission.json>     arranca el bucle supervisor
   goal-compass status --mission <mission-id>      muestra el estado de la mision
   goal-compass nudge --mission <mission-id>        empuja la sesion si la cadena se quedo quieta
-  goal-compass watch --mission <mission-id> --every 10m   repite el empujon cada cierto rato
+  goal-compass watch [--mission <id>] [--all] --every 10m  repite el empujon cada cierto rato
   goal-compass pause|resume|stop --mission <id>   ordenes del usuario
   goal-compass probe  --workspace <dir>           comprueba la extension ACP del host
   goal-compass tree   --workspace <dir>           prepara el arbol del proyecto y lo valida
@@ -83,6 +83,7 @@ function parse(argv: string[]): { values: Options; positionals: string[] } {
       prompt: { type: 'string' },
       'dry-run': { type: 'boolean' },
       quiet: { type: 'boolean' },
+      all: { type: 'boolean' },
       'max-iterations': { type: 'string' },
       help: { type: 'boolean' },
     },
@@ -516,10 +517,15 @@ function resolveProjectRoot(): string {
 
 /** Empuja la sesion si toca. Devuelve lo que paso, para poder contarlo. */
 async function empujar(missionId: string, values: Options, _imprimir: boolean): Promise<string> {
-  const state = await new FileJournal(missionId).load();
-  if (!state) {
+  const guardado = await new FileJournal(missionId).load();
+  if (!guardado) {
     return `la mision ${missionId} todavia no tiene estado: nada que empujar`;
   }
+  // Los journals que llevan tiempo guardados estan en el formato de cuando se
+  // escribieron, no en el de ahora. Sin normalizar, un candidato de antes no
+  // tiene la lista de prerrequisitos y el vigilante revienta al mirarlo —que
+  // es justo lo que hacia, en vez de empujar.
+  const state = normalizeJournal(guardado);
   // El backlog declarado es la unica fuente que se puede mirar sin abrir un
   // host, y es la que decide si hay trabajo de verdad delante.
   const candidates: Candidate[] = state.mission.backlog;
@@ -623,25 +629,63 @@ function parseInterval(raw: unknown, fallback: number): number {
  * gasta turnos.
  */
 async function cmdWatch(values: Options): Promise<void> {
-  const missionId = requireMissionId(values);
   const cada = parseInterval(values.every ?? values.interval, DEFAULT_WATCH_INTERVAL_MS);
   const verbose = values.quiet === undefined;
+  const todas = values.all !== undefined;
+  const misiones = todas ? todasLasMisiones() : [requireMissionId(values)];
+  if (misiones.length === 0) {
+    console.log('no hay ninguna mision declarada todavia');
+    return;
+  }
 
-  console.log(`vigilando la mision ${missionId} cada ${Math.round(cada / 1000)}s; Ctrl-C para parar`);
-  readNudgePrompt(missionId);
+  console.log(
+    `vigilando ${misiones.length} mision(es) cada ${Math.round(cada / 1000)}s; Ctrl-C para parar`,
+  );
+  for (const id of misiones) readNudgePrompt(id);
 
-  let pares = 0;
-  let impares = 0;
+  let vuelta = 0;
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, cada));
-    pares += 1;
-    impares = 0;
-    try {
-      const salida = await empujar(missionId, values, false);
-      if (verbose && salida) console.log(salida);
-    } catch (err) {
-      console.log(`la vuelta ${pares} fallo: ${(err as Error).message}`);
+    vuelta += 1;
+    for (const missionId of misiones) {
+      // El empujon va en segundo plano. Injectar tarda medio minuto, y una
+      // vuelta no puede quedarse esperando a una sesion: si se atasca aqui,
+      // las demas misiones dejan de mirarse justo cuando mas falta hacen.
+      // El empujon escribe en el registro, no en la nada: una cadena que se
+      // despierta sola sin dejar rastro es indistinguible de una que no.
+      const hijo = spawn(process.execPath, [process.argv[1]!, 'nudge', '--mission', missionId], {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      hijo.stdout?.on('data', (trozo: Buffer) => anotar(trozo.toString()));
+      hijo.stderr?.on('data', (trozo: Buffer) => anotar(trozo.toString()));
+      hijo.unref();
     }
+    if (verbose) console.log(`vuelta ${vuelta}: ${misiones.length} mision(es) mirada(s)`);
+  }
+}
+
+/** Lo que dice el reloj, con la hora, en un registro aparte. */
+function anotar(texto: string): void {
+  const destino = join(stateRoot(), 'watch.log');
+  try {
+    mkdirSync(dirname(destino), { recursive: true });
+    appendFileSync(destino, `[${new Date().toISOString()}] ${texto}`);
+  } catch {
+    // Sin registro no hay drama: el empujon ya esta hecho o ya ha fallado.
+  }
+}
+
+/** Todas las misiones que tienen estado guardado. */
+function todasLasMisiones(): string[] {
+  try {
+    return readdirSync(stateRoot(), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => existsSync(join(stateRoot(), entry.name, 'journal.json')))
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return [];
   }
 }
 
