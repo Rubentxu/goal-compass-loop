@@ -1,0 +1,25 @@
+# El reloj que empuja a las sesiones cuando la cadena se queda esperando.
+#
+# Vive fuera de la sesion a proposito: el plugin solo reacciona a eventos del
+# host, y el caso que falta no produce ninguno. Este proceso es el que mira.
+#
+# Se instala con `goal-compass install-watch`, que ademas deja el servicio
+# arrancado. El ritmo se cambia aqui, en Environment, o pasando `--every`.
+[Unit]
+Description=Goal Compass · empujon a las sesiones cuando la cadena se queda quieta
+Documentation=man:mcode(1)
+
+[Service]
+Type=simple
+Environment=GOAL_COMPASS_WATCH_EVERY=10m
+ExecStart=/bin/sh -c 'exec "$HOME/.minimax/plugins/goal-compass/dist/cli.js" watch --all --every "$GOAL_COMPASS_WATCH_EVERY"'
+Restart=always
+RestartSec=30
+# Un reloj que empuja mal es peor que un reloj que no empuja: si se queda
+# tantas veces seguidas sin poder ni leer el estado, se para y avisa en el
+# registro en vez de insistir.
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Install]
+WantedBy=default.target
