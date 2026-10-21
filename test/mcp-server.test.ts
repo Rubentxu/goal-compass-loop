@@ -21,13 +21,14 @@ import type { Logger } from '../src/ports.js';
 const quietLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 
 
-function writeMission(workspace: string, missionId = 'prueba-mcp'): void {
+function writeMission(workspace: string, missionId = 'prueba-mcp', executed: unknown[] = []): void {
   writeFileSync(
     join(workspace, 'goal-compass.json'),
     JSON.stringify({
       missionId,
       objective: 'Comprobar las herramientas de la mision',
       defaultTokenBudget: 60000,
+      executed,
       backlog: [
         {
           candidateId: 'revisar-notas',
@@ -169,6 +170,34 @@ describe('servidor de herramientas de la mision', () => {
     expect(text).toContain('Propuesta registrada');
     expect(readProposals('prueba-mcp')).toHaveLength(1);
     expect(existsSync(proposalsPath('prueba-mcp'))).toBe(true);
+  });
+
+  it('no ofrece como trabajo disponible lo que ya se ejecuto', async () => {
+    writeMission(workspace, 'prueba-mcp', [
+      { candidateId: 'revisar-notas', objective: 'Revisar las notas del repositorio' },
+    ]);
+    const tools = buildMissionTools({ cwd: workspace, logger: quietLogger });
+
+    const text = await callTool(tools, 'mission_status');
+
+    expect(text).toContain('Objetivos ya ejecutados: 1');
+    expect(text).not.toContain('Revisar las notas del repositorio');
+  });
+
+  it('no registra como propuesta un trabajo que ya se ejecuto', async () => {
+    writeMission(workspace, 'prueba-mcp', [
+      { candidateId: 'revisar-notas', objective: 'Revisar las notas del repositorio' },
+    ]);
+    const tools = buildMissionTools({ cwd: workspace, logger: quietLogger });
+
+    const text = await callTool(tools, 'mission_propose', {
+      objective: 'Revisar las notas del repositorio',
+      evidence: 'NOTAS.md',
+      doneWhen: ['Las notas estan revisadas'],
+    });
+
+    expect(text).toContain('ya está ejecutado');
+    expect(readProposals('prueba-mcp')).toHaveLength(0);
   });
 
   it('descarta una propuesta cuya evidencia no existe', async () => {

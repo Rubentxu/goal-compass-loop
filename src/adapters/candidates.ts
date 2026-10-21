@@ -7,21 +7,40 @@
  */
 import { loadMissionConfig } from './mission.js';
 import { WorkspaceEvidenceScanner, type Evidence } from './discovery.js';
+import { completedObjectives, isCompleted, type CompletedObjectives } from './ledger.js';
 import type { Candidate, GoalState, Mission } from '../core/types.js';
 import type { CandidatePort } from '../ports.js';
 
-/** Candidatos declarados en el fichero de la mision, releidos en cada consulta. */
+/**
+ * Candidatos declarados en el fichero de la mision, releidos en cada consulta.
+ *
+ * Lo que el mismo fichero dice que ya se hizo no se vuelve a ofrecer: el
+ * backlog es lo que queda, no la historia.
+ */
 export class MissionConfigCandidatePort implements CandidatePort {
-  constructor(private readonly configPath: string) {}
+  private readonly completed: CompletedObjectives;
+
+  constructor(
+    private readonly configPath: string,
+    completed?: CompletedObjectives,
+  ) {
+    this.completed = completed ?? completedObjectives(configPath);
+  }
 
   async discover(mission: Mission, _previousGoal: GoalState | null): Promise<Candidate[]> {
     try {
       const config = loadMissionConfig(this.configPath);
-      if (config.backlog.length > 0) return config.backlog;
+      if (config.backlog.length > 0) {
+        return config.backlog.filter(
+          (candidate) => !isCompleted(this.completed, candidate.objective),
+        );
+      }
     } catch {
       /* fichero ilegible: se sigue con el backlog guardado en el journal */
     }
-    return mission.backlog;
+    return mission.backlog.filter(
+      (candidate) => !isCompleted(this.completed, candidate.objective),
+    );
   }
 }
 

@@ -20,6 +20,7 @@ import { WorkspaceEvidenceScanner } from './adapters/discovery.js';
 import { SessionExploration } from './adapters/exploration.js';
 import { ChainLock, decideDriving } from './adapters/ownership.js';
 import { ProposalCandidatePort } from './adapters/proposals.js';
+import { completedObjectives, type CompletedObjectives } from './adapters/ledger.js';
 import { emptyMetrics, normalizeJournal, type Driver, type Journal } from './core/types.js';
 import type { CandidatePort, GoalAdapter, Logger } from './ports.js';
 import { Supervisor, type HostObjectiveContext } from './supervisor.js';
@@ -81,6 +82,13 @@ export interface MissionRuntime {
 export interface CandidatePortOptions {
   /** Maximo de senales del workspace que se ofrecen como trabajo. */
   maxEvidence?: number;
+  /**
+   * Objetivos ya ejecutados.
+   *
+   * Por defecto se leen del propio fichero de la mision, que es donde el
+   * workspace anota lo que ya hizo.
+   */
+  completedObjectives?: CompletedObjectives;
 }
 
 export function buildCandidatePorts(
@@ -91,9 +99,10 @@ export function buildCandidatePorts(
   const scanner = new WorkspaceEvidenceScanner(
     options.maxEvidence === undefined ? {} : { maxEvidence: options.maxEvidence },
   );
+  const completed = options.completedObjectives ?? completedObjectives(configPath);
   return [
-    new MissionConfigCandidatePort(configPath),
-    new ProposalCandidatePort(workspace),
+    new MissionConfigCandidatePort(configPath, completed),
+    new ProposalCandidatePort(workspace, completed),
     new WorkspaceDiscovery(scanner),
   ];
 }

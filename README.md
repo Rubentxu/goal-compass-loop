@@ -180,6 +180,32 @@ Si prefieres escribirla a mano, el fichero se llama `goal-compass.json` y el
 }
 ```
 
+El fichero puede llevar además una lista `executed`: lo que ya se hizo. Es la
+memoria del proyecto, y sirve para que la cadena no vuelva a ofrecer trabajo
+que ya está pagado:
+
+```json
+{
+  "missionId": "mejora-continua",
+  "objective": "Mejorar y estabilizar este proyecto de forma continua",
+  "executed": [
+    {
+      "candidateId": "parser-terraform-edges",
+      "objective": "Corregir la pérdida de relaciones Terraform al indexar recursos",
+      "receipt": "PR #12"
+    }
+  ],
+  "backlog": []
+}
+```
+
+Lo que esté en `executed` no se ofrece como trabajo, ni desde el backlog ni
+desde una propuesta, y `mission_propose` rechaza la propuesta de un trabajo ya
+hecho. La comparación es por intención: da igual que el objetivo esté escrito
+con otras palabras. Si la lista no está, el comportamiento es el de siempre.
+Ver [ADR-004](docs/adr/ADR-004-lo-ejecutado-no-vuelve-a-ofrecerse.md) para el
+porqué.
+
 ### 2. Instalar solo la skill (opcional)
 
 ```bash
