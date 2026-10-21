@@ -8,7 +8,7 @@
 import { loadMissionConfig } from './mission.js';
 import { WorkspaceEvidenceScanner, type Evidence } from './discovery.js';
 import { completedObjectives, isCompleted, type CompletedObjectives } from './ledger.js';
-import type { Candidate, GoalState, Mission } from '../core/types.js';
+import { normalize, type Candidate, type GoalState, type Mission } from '../core/types.js';
 import type { CandidatePort } from '../ports.js';
 
 /**
@@ -68,7 +68,7 @@ export class ComposedCandidatePort implements CandidatePort {
     for (const source of this.sources) {
       collected.push(...(await source.discover(mission, previousGoal)));
     }
-    return dedupe(collected);
+    return collapse(collected);
   }
 }
 
@@ -88,13 +88,22 @@ function toCandidate(evidence: Evidence): Candidate {
   };
 }
 
-/** Elimina repeticiones conservando la primera aparicion. */
-function dedupe(candidates: Candidate[]): Candidate[] {
+/**
+ * Elimina repeticiones conservando la primera aparicion.
+ *
+ * Lo que se repite es la intencion, no el identificador: el mismo trabajo
+ * puede llegar por dos canales (el backlog curado y una propuesta) con
+ * atributos distintos, y en el menu de trabajo tiene que aparecer una vez.
+ * Se conserva la primera, que es la del canal curado, porque es la que
+ * alguien ha cuidado.
+ */
+function collapse(candidates: Candidate[]): Candidate[] {
   const seen = new Set<string>();
   const unique: Candidate[] = [];
   for (const candidate of candidates) {
-    if (seen.has(candidate.candidateId)) continue;
-    seen.add(candidate.candidateId);
+    const intention = normalize(candidate.objective);
+    if (seen.has(intention)) continue;
+    seen.add(intention);
     unique.push(candidate);
   }
   return unique;
