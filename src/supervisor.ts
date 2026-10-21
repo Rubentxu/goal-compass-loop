@@ -24,6 +24,7 @@ import {
   normalize,
   normalizeJournal,
   type Candidate,
+  type Decision,
   type GoalRecord,
   type GoalState,
   type Journal,
@@ -245,7 +246,32 @@ export class Supervisor {
     const candidates = [...discovered, ...journal.explored];
     const snapshot = this.buildSnapshot(journal, goal, candidates);
     await this.updateMetrics(journal, goal);
-    return decide(snapshot);
+
+    const decision = decide(snapshot);
+    await this.wakeIfAsleep(journal, decision);
+    return decision;
+  }
+
+  /**
+   * Despierta la mision cuando el motivo por el que se aparco ya no se cumple.
+   *
+   * Aparcar describe por que la cadena se callo **ahora**, no como es la mision.
+   * Si el siguiente ciclo decide otra cosa —el objetivo vuelve a avanzar, o
+   * aparece trabajo elegible— la razon guardada ya no explica nada, y el estado
+   * se queda anunciando un bloqueo donde la cadena esta perfectamente sana.
+   *
+   * Solo la cadena aparca. Las pausas y las paradas son ordenes del usuario, y
+   * un estado que el usuario puso no se levanta porque la cadena tenga ganas de
+   * trabajar: para eso existe el orden de reanudar.
+   */
+  private async wakeIfAsleep(journal: Journal, decision: Decision): Promise<void> {
+    if (journal.mission.status !== 'parked') return;
+    if (decision.kind === 'park') return;
+
+    journal.mission.status = 'running';
+    journal.mission.reason = undefined;
+    await this.saveJournal(journal);
+    this.logger.info(`la mision vuelve a estar en marcha: ${decision.reason}`);
   }
 
   /**
