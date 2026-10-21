@@ -35,6 +35,21 @@ export const BUDGET_EXHAUSTED_GOAL_STATUSES: readonly GoalStatus[] = [
 ];
 
 /**
+ * Estados en los que un objetivo deja de trabajar para siempre.
+ *
+ * Cualquiera de ellos es un desenlace que hay que recordar: el objetivo ya no
+ * va a avanzar por si mismo. La diferencia esta en lo que significan, y por eso
+ * el registro guarda el estado en vez de aplanarlos todos a "hecho": solo
+ * `complete` marca el trabajo como pagado; los demas dejan rastro para poder
+ * decidir que hacer —reintentar, desbloquear o cambiar de tarea— sin volver a
+ * perderlos de vista.
+ */
+export const TERMINAL_GOAL_STATUSES: readonly GoalStatus[] = [
+  'complete',
+  ...NON_SUCCESS_GOAL_STATUSES,
+];
+
+/**
  * Cuantos intentos se le dan a un trabajo antes de dejarlo para un humano.
  *
  * El presupuesto se dobla en cada intento, asi que la secuencia habitual es

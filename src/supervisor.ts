@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { decide } from './core/decide.js';
 import {
   BUDGET_EXHAUSTED_GOAL_STATUSES,
+  TERMINAL_GOAL_STATUSES,
   candidateKey,
   composeObjective,
   normalize,
@@ -291,10 +292,15 @@ export class Supervisor {
       candidates,
       pendingIntent: journal.intents.find((intent) => intent.status === 'intent') ?? null,
       completedGoalIds: journal.goals.map((record) => record.goalId),
+      // Solo `complete` marca trabajo pagado. Un objetivo que se liquido
+      // bloqueado o sin presupuesto sigue siendo trabajo pendiente: se puede
+      // reintentar, desbloquear o volver a elegir, pero no se da por hecho.
       completedCandidateIds: journal.goals
+        .filter((record) => record.status === 'complete')
         .map((record) => record.candidateId)
         .filter((id): id is string => typeof id === 'string'),
       completedCandidateKeys: journal.goals
+        .filter((record) => record.status === 'complete')
         .map((record) => record.candidateKey)
         .filter((key): key is string => typeof key === 'string'),
       goalsCreated: journal.intents.filter((intent) => intent.status === 'committed').length,
@@ -362,9 +368,16 @@ export class Supervisor {
     return goal;
   }
 
-  /** Registra en el journal un Goal recien completado, una sola vez por Goal. */
+  /** Registra en el journal un Goal liquidado, una sola vez por Goal. */
   private async syncCompletedGoal(journal: Journal, goal: GoalState | null): Promise<void> {
-    if (!goal || goal.status !== 'complete') return;
+    if (!goal) return;
+    // Cualquier desenlace terminal deja rastro, no solo `complete`. Cuando el
+    // host liquida el objetivo en `blocked`, `paused` o `budget_limited` y no se
+    // guarda nada, el trabajo queda sin marcar: la cadena vuelve a ofrecerlo y
+    // aparece un objetivo nuevo para lo mismo, indefinidamente. Guardar el
+    // estado —no aplanarlo a "hecho"— es lo que permite despues decidir si se
+    // reintenta, se desbloquea o se cambia de tarea.
+    if (!TERMINAL_GOAL_STATUSES.includes(goal.status)) return;
     if (journal.goals.some((record) => record.goalId === goal.goalId)) return;
 
     // Un objetivo que la cadena no creo no es trabajo de la mision: no se le
@@ -397,7 +410,7 @@ export class Supervisor {
     this.pruneExplored(journal);
     await this.saveJournal(journal);
     this.logger.info(
-      `goal completado registrado: ${goal.goalId} (${goal.statusReason ?? 'sin motivo'})`,
+      `goal liquidado registrado: ${goal.goalId} en ${goal.status} (${goal.statusReason ?? 'sin motivo'})`,
     );
   }
 
