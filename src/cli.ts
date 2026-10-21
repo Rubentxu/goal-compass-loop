@@ -7,11 +7,12 @@
  * pause o continue. La orden del usuario viaja por un canal de control
  * separado del journal, de modo que nunca se pisa el estado de ejecucion.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { spawnSync } from 'node:child_process';
 import { AcpGoalAdapter } from './adapters/acp-goal.js';
 import { FileControlPort } from './adapters/control.js';
 import { FileJournal, journalPath, stateRoot } from './adapters/journal.js';
@@ -21,13 +22,16 @@ import { openMission, ensureMissionState } from './runtime.js';
 import { loadTree, validateTree } from './adapters/tree.js';
 import { ensureWorkdir, treeDirFor } from './adapters/workdir.js';
 import { findMissionFile } from './plugin/mission-locator.js';
+import { nudgePromptPath, readNudgePrompt } from './plugin/nudge-prompt.js';
 import {
   defaultMarketplaceDir,
   installPlugin,
   PLUGIN_NAME,
   projectRootFromModule,
 } from './plugin/install.js';
-import type { MissionStatus } from './core/types.js';
+import { selectCandidates } from './core/decide.js';
+import type { Candidate, Journal, MissionStatus } from './core/types.js';
+import { DEFAULT_NUDGE_COOLDOWN_MS, DEFAULT_NUDGE_STALL_MS, decideNudge } from './core/nudge.js';
 
 const logger = {
   info: (message: string) => console.log(`[${new Date().toISOString()}] ${message}`),
@@ -46,6 +50,8 @@ const USAGE = `Goal Compass Loop · supervisor de Goals nativos
   goal-compass init   --config <mission.json>     prepara el estado durable de la mision
   goal-compass run    --config <mission.json>     arranca el bucle supervisor
   goal-compass status --mission <mission-id>      muestra el estado de la mision
+  goal-compass nudge --mission <mission-id>        empuja la sesion si la cadena se quedo quieta
+  goal-compass watch --mission <mission-id> --every 10m   repite el empujon cada cierto rato
   goal-compass pause|resume|stop --mission <id>   ordenes del usuario
   goal-compass probe  --workspace <dir>           comprueba la extension ACP del host
   goal-compass tree   --workspace <dir>           prepara el arbol del proyecto y lo valida
@@ -73,6 +79,10 @@ function parse(argv: string[]): { values: Options; positionals: string[] } {
       'total-budget': { type: 'string' },
       'allow-remote-write': { type: 'boolean' },
       'poll-ms': { type: 'string' },
+      every: { type: 'string' },
+      prompt: { type: 'string' },
+      'dry-run': { type: 'boolean' },
+      quiet: { type: 'boolean' },
       'max-iterations': { type: 'string' },
       help: { type: 'boolean' },
     },
@@ -504,11 +514,149 @@ function resolveProjectRoot(): string {
   ) ?? candidates[0]!;
 }
 
+/** Empuja la sesion si toca. Devuelve lo que paso, para poder contarlo. */
+async function empujar(missionId: string, values: Options, _imprimir: boolean): Promise<string> {
+  const state = await new FileJournal(missionId).load();
+  if (!state) {
+    return `la mision ${missionId} todavia no tiene estado: nada que empujar`;
+  }
+  // El backlog declarado es la unica fuente que se puede mirar sin abrir un
+  // host, y es la que decide si hay trabajo de verdad delante.
+  const candidates: Candidate[] = state.mission.backlog;
+  const elegible = selectCandidates({
+    mission: state.mission,
+    goal: null,
+    candidates,
+    pendingIntent: null,
+    completedGoalIds: [],
+    completedCandidateIds: [],
+    completedCandidateKeys: [],
+    goalsCreated: 0,
+    tokensUsedTotal: 0,
+    ownGoal: false,
+    goalCandidate: null,
+    goalCandidateKey: null,
+    budgetAttempts: [],
+    goalProgressSince: state.progress?.since ?? null,
+    now: Date.now(),
+  });
+
+  const veredicto = decideNudge({
+    missionStatus: state.mission.status,
+    goalSignature: state.progress?.signature,
+    goalProgressSince: state.progress?.since ?? null,
+    hasEligibleWork: elegible.eligible.length > 0,
+    lastNudgeAt: state.lastNudgeAt ?? null,
+    now: Date.now(),
+    stallTimeoutMs: state.mission.nudgeStallMs ?? DEFAULT_NUDGE_STALL_MS,
+    cooldownMs: DEFAULT_NUDGE_COOLDOWN_MS,
+  });
+
+  console.log(veredicto.reason);
+  if (!veredicto.nudge) return '';
+
+  // La sesion tiene que seguir viva: si no esta, empujar es escribir al vacio.
+  if (!state.sessionId) {
+    return 'la mision no tiene sesion: no hay a quien empujar';
+  }
+  if (values['dry-run']) {
+    return `[asi seria] mcode exec --session ${state.sessionId} --cwd ${state.mission.workspace}`;
+  }
+
+  const prompt =
+    typeof values.prompt === 'string' && values.prompt ? values.prompt : readNudgePrompt(missionId);
+  console.log(`inyectando desde ${nudgePromptPath(missionId)}`);
+  const child = spawnSync(
+    'mcode',
+    [
+      'exec',
+      '--session',
+      state.sessionId,
+      '--cwd',
+      state.mission.workspace,
+      '--timeout',
+      '10m',
+      '--output-last-message',
+      join(stateRoot(), missionId, 'last-nudge.txt'),
+      prompt,
+    ],
+    { encoding: 'utf8' },
+  );
+
+  state.lastNudgeAt = Date.now();
+  await new FileJournal(missionId).saveAtomically(state);
+
+  if (child.status !== 0) {
+    return `el empujon no cuaja: ${(child.stderr || '').trim() || `codigo ${child.status}`}`;
+  }
+  return `sesion empujada: ${state.sessionId}`;
+}
+
+/** Cada cuanto mira por defecto. Diez minutos es cuando ya se nota. */
+const DEFAULT_WATCH_INTERVAL_MS = 10 * 60_000;
+
+/** Convierte `10m`, `90s` o un numero de milisegundos en milisegundos. */
+function parseInterval(raw: unknown, fallback: number): number {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  if (typeof raw !== 'string' || !raw.trim()) return fallback;
+  const texto = raw.trim();
+  const numero = Number(texto);
+  if (Number.isFinite(numero) && numero > 0) return Math.floor(numero);
+  const unidad = /^(\d+)\s*(ms|s|m|h)$/i.exec(texto);
+  if (!unidad) return fallback;
+  const factors: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+  return Number(unidad[1]) * (factors[unidad[2]!.toLowerCase()] ?? 1);
+}
+
+/**
+ * Mira la cadena cada cierto rato y la empuja si se ha quedado esperando.
+ *
+ * Vive fuera de la sesion a proposito: el plugin solo reacciona a eventos del
+ * host, y el caso que falta no produce ninguno —un objetivo quieto con la
+ * sesion abierta no cierra ningun turno—. Aqui no hay sesion ni turno: hay un
+ * reloj, y el reloj escribe en la sesion cuando toca. Es la unica pieza del
+ * sistema que hace algo sin que pase nada, y por eso mismo es la que decide
+ * cuando hay que empujar en vez de esperar.
+ *
+ * Un empujon por vuelta, y como mucho. Si el objetivo sigue quieto despues,
+ * se respeta el enfriamiento: empujar mas seguido no continua la cadena, solo
+ * gasta turnos.
+ */
+async function cmdWatch(values: Options): Promise<void> {
+  const missionId = requireMissionId(values);
+  const cada = parseInterval(values.every ?? values.interval, DEFAULT_WATCH_INTERVAL_MS);
+  const verbose = values.quiet === undefined;
+
+  console.log(`vigilando la mision ${missionId} cada ${Math.round(cada / 1000)}s; Ctrl-C para parar`);
+  readNudgePrompt(missionId);
+
+  let pares = 0;
+  let impares = 0;
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, cada));
+    pares += 1;
+    impares = 0;
+    try {
+      const salida = await empujar(missionId, values, false);
+      if (verbose && salida) console.log(salida);
+    } catch (err) {
+      console.log(`la vuelta ${pares} fallo: ${(err as Error).message}`);
+    }
+  }
+}
+
+async function cmdNudge(values: Options): Promise<void> {
+  const missionId = requireMissionId(values);
+  console.log(await empujar(missionId, values, true));
+}
+
 const COMMANDS: Record<string, (values: Options) => Promise<void>> = {
   declare: cmdDeclare,
   init: cmdInit,
   run: cmdRun,
   status: cmdStatus,
+  nudge: cmdNudge,
+  watch: cmdWatch,
   pause: controlCommand('paused_by_user'),
   resume: controlCommand('running'),
   stop: controlCommand('stopped_by_user'),

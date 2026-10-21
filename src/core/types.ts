@@ -135,6 +135,14 @@ export interface Mission {
   maxGoals: number | null;
   /** Milisegundos sin avance antes de dar la mision por estancada. */
   stallTimeoutMs: number;
+  /**
+   * Milisegundos sin avance antes de empujar a la sesion para que siga.
+   *
+   * Va aparte del umbral de estancamiento a proposito: aparcarse es rendirse,
+   * y empujar es despertarse. Empezar antes de rendirse es justo lo que evita
+   * quedarse dormido, asi que el empujon se adelanta a la rendicion.
+   */
+  nudgeStallMs?: number | undefined;
   /** Autorizado a pedir una exploracion cuando no hay trabajo elegible. */
   explorationEnabled: boolean;
   /** Milisegundos entre exploraciones, para no repetir la misma consulta. */
@@ -272,6 +280,8 @@ export interface Journal {
   explorationStreak: number;
   /** Momento de la ultima exploracion, para respetar el enfriamiento. */
   lastExplorationAt: number | undefined;
+  /** Cuando se empujo a la sesion por ultima vez, para no insistir. */
+  lastNudgeAt?: number | undefined;
   /** Intentos que se quedaron sin presupuesto, con su coste. */
   budgetAttempts: BudgetAttempt[];
   /** Medidas de la mision: cuanto lleva gastado y como va. */
