@@ -222,6 +222,46 @@ describe('proceso vivo', () => {
     await adapter.close();
   }, 20_000);
 
+  it('responde al instante mientras la sesion aun se esta cargando', async () => {
+    // El socket esta abierto antes de que la sesion este cargada, para que el
+    // hook no espere a que el proceso exista. Durante esa ventana entra algo, y
+    // lo unico que se puede hacer por el es cargar la sesion: segundos que
+    // crecen con el historial, en el turno de quien pregunta. Con una sesion
+    // grande no cabe ni una ni otra vez.
+    //
+    // Asi que contesta que no esta listo, sin mas, y es quien pregunta el que
+    // decide. Bloquearse aqui es peor que no tener proceso vivo.
+    const sessionId = 'mvs_vivo';
+    const socketPath = startKeeper(sessionId, {
+      FAKE_ACP_SEED_GOAL: 'active',
+      FAKE_ACP_LOAD_DELAY_MS: '4000',
+    });
+    expect(await waitFor(() => existsSync(socketPath))).toBe(true);
+
+    const adapter = new KeeperGoalAdapter({
+      sessionId,
+      socketPath,
+      logger: quietLogger,
+      requestTimeoutMs: 10_000,
+    });
+    await adapter.start();
+
+    const instante = Date.now();
+    let fallo: string | undefined;
+    try {
+      await adapter.read(sessionId);
+    } catch (err) {
+      fallo = (err as Error).message;
+    }
+    const pasado = Date.now() - instante;
+
+    expect(fallo).toBeTruthy();
+    // Ni se queda esperando a que termine la carga, ni la repite por su cuenta.
+    expect(pasado).toBeLessThan(2_500);
+
+    await adapter.close();
+  }, 20_000);
+
   it('se retira cuando el plugin de debajo ya no es el suyo', async () => {
     // Este proceso vive horas con la sesion cargada. Si el plugin se actualiza
     // mientras tanto, seguir sirviendo deja la cadena decidiendo con el codigo

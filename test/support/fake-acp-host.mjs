@@ -31,6 +31,7 @@ const seedStatus = process.env.FAKE_ACP_SEED_GOAL ?? '';
 const seedId = process.env.FAKE_ACP_SEED_ID ?? 'tg_fake_1';
 const seedBudget = Number(process.env.FAKE_ACP_SEED_BUDGET ?? 0);
 const freezeAfterMs = Number(process.env.FAKE_ACP_FREEZE_AFTER_MS ?? 0);
+const loadDelayMs = Number(process.env.FAKE_ACP_LOAD_DELAY_MS ?? 0);
 const driftAfterMs = Number(process.env.FAKE_ACP_DRIFT_AFTER_MS ?? 0);
 const driftStatus = process.env.FAKE_ACP_DRIFT_STATUS ?? 'active';
 const startedAt = Date.now();
@@ -170,6 +171,16 @@ input.on('line', (line) => {
       send({ jsonrpc: '2.0', id, result: { sessionId: 'mvs_fake' } });
       return;
     case 'session/load':
+      // Cargar la sesion es lo caro, y su coste crece con el historial. Una
+      // sesion grande tarda mas que el margen que se le da, y entonces no es que
+      // el host este ocupado: es que la carga no cabe.
+      if (loadDelayMs > 0) {
+        setTimeout(() => {
+          seedGoal(params.sessionId);
+          send({ jsonrpc: '2.0', id, result: { modes: { currentModeId: 'default' } } });
+        }, loadDelayMs);
+        return;
+      }
       seedGoal(params.sessionId);
       send({ jsonrpc: '2.0', id, result: { modes: { currentModeId: 'default' } } });
       return;

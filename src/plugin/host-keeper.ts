@@ -50,6 +50,18 @@ const GOAL_READ_TIMEOUT_MS = 400;
  */
 const GOAL_FRESH_MS = 10_000;
 
+/**
+ * Margen que se le concede a la sesion para estar lista antes de rendirse.
+ *
+ * Espera corta a proposito. Cargar la sesion del host son segundos que crecen
+ * con el historial, y quien pregunta es el hook: su margen lo tiene que cubrir
+ * todavia para el camino de reserva. Un margen aqui sale del mismo presupuesto
+ * que ese, asi que tiene que ser una fraccion. Lo justo para que una carga
+ * normal haya terminado, y no lo suficiente como para quedarse esperando a una
+ * que no va a acabar nunca.
+ */
+const READY_WAIT_MS = 1_500;
+
 /** Espera entre intentos de cargar la sesion. */
 const RETRY_DELAY_MS = 1_000;
 
@@ -262,6 +274,17 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
       goal: () => cachedGoal,
       setGoal: remember,
       revalidate,
+      waitReady: async (ms: number) => {
+        if (ready) return true;
+        const limite = Date.now() + ms;
+        // Preguntar antes de rendirse: al principio casi siempre esta a punto,
+        // y cargarla al primer skepto mientras se espera es lo que da el
+        // problema. Aqui solo se mira.
+        while (!ready && Date.now() < limite) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        return ready;
+      },
       isStaleCode: () => {
         const firma = codeSignature();
         // Sin firma no hay nada que comparar: mejor seguir sirviendo que
@@ -380,6 +403,8 @@ interface ConnectionContext {
   revalidate: () => void;
   /** Si el plugin de debajo ya no es el que arranco este proceso. */
   isStaleCode: () => boolean;
+  /** Espera acotada a que la sesion este cargada. */
+  waitReady: (ms: number) => Promise<boolean>;
   shutdown: () => Promise<void>;
 }
 
@@ -444,17 +469,22 @@ async function serve(request: KeeperRequest, context: ConnectionContext): Promis
 
   const started = Date.now();
   try {
-    let adapter = context.getAdapter();
-    if (!adapter) {
-      // El host todavia no estaba listo: se intenta una vez mas, y si no, la
-      // peticion falla y quien la pidio decide que hacer.
-      const candidate = context.build();
-      await candidate.start();
-      adapter = candidate;
+    if (!(await context.waitReady(READY_WAIT_MS))) {
+      // Todavia no se ha podido cargar la sesion, y cargarla es justo lo caro:
+      // cuesta segundos y crece con el historial. Hacerlo aqui bloquearia a
+      // quien pregunta —que es el hook, y el hook lo que esta esperando es al
+      // host que lo ha llamado— durante lo que tardase, y para siempre si la
+      // sesion es grande. Ademas el hook tiene su propio margen: un bloqueo
+      // largo se lo come entero.
+      //
+      // Asi que se responde que todavia no, sin mas, y es quien pregunta el que
+      // decide. El camino de reserva —abrir su propio host— ya existe para esto.
+      return { ok: false, error: 'el proceso vivo todavia no esta listo' };
     }
+    const adapter = context.getAdapter();
 
     const sessionId = context.sessionId;
-    const response = await serveOnHost(request, adapter, sessionId, context);
+    const response = await serveOnHost(request, adapter!, sessionId, context);
     context.logger.info(`${request.action} atendido en ${Date.now() - started} ms`);
     return response;
   } catch (err) {
