@@ -20,6 +20,7 @@ import { KeeperGoalAdapter } from '../adapters/keeper-goal.js';
 import { locateMission } from './mission-locator.js';
 import { keeperSocketPath } from './keeper-protocol.js';
 import { parseHookEvent, type HookEvent } from './hook-event.js';
+import { readStdinPayload, STDIN_READ_DEADLINE_MS } from './stdin-payload.js';
 import type { Logger } from '../ports.js';
 
 /** Registro que escribe en la salida de error: la salida normal es del hook. */
@@ -200,9 +201,13 @@ function isEntryPoint(): boolean {
 
 /** Punto de entrada: el host ejecuta este fichero y lee su salida. */
 async function main(): Promise<void> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
-  const raw = Buffer.concat(chunks).toString('utf8');
+  let raw: string;
+  try {
+    raw = await readStdinPayload(STDIN_READ_DEADLINE_MS);
+  } catch (err) {
+    logger.error(String(err));
+    process.exit(0);
+  }
   await runSessionHook(raw);
   process.exit(0);
 }
