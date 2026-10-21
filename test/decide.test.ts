@@ -25,7 +25,10 @@ describe('decide · nucleo puro', () => {
     expect(decision.kind).toBe('wait');
   });
 
-  it.each(['paused', 'blocked', 'budget_limited', 'usage_limited'] as const)(
+  // Pausar es decision de alguien y la cuota es un limite real del host: en
+  // ninguno de los dos casos se esquiva creando otro Goal. `blocked` si es
+  // distinto —el objetivo se atasco solo— y tiene su propia regla mas abajo.
+  it.each(['paused', 'budget_limited', 'usage_limited'] as const)(
     'no esquiva el limite %s creando otro Goal',
     (status) => {
       const decision = decide(
@@ -123,7 +126,10 @@ describe('decide · nucleo puro', () => {
     expect(decision.kind).toBe('wait');
   });
 
-  it('da la mision por estancada cuando el objetivo no avanza', () => {
+  it('un objetivo activo que avanza despacio no apaga la mision', () => {
+    // Antes esto devolvia `park`. Un objetivo lento puede ser una compilacion
+    // larga: es actividad, no un bloqueo, y aparcar la mision por un umbral de
+    // tiempo apagaba trabajo que si estaba avanzando.
     const decision = decide(
       aSnapshot({
         goal: aGoal({ status: 'active' }),
@@ -133,8 +139,7 @@ describe('decide · nucleo puro', () => {
         now: 1_700_000_000_000,
       }),
     );
-    expect(decision.kind).toBe('park');
-    expect(decision.reason).toContain('sin avanzar');
+    expect(decision.kind).toBe('wait');
   });
 
   it('detecta el estancamiento tambien en un objetivo bloqueado', () => {

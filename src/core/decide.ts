@@ -12,6 +12,7 @@ import {
   type Candidate,
   type Decision,
   type GoalState,
+  type Mission,
   type Snapshot,
 } from './types.js';
 
@@ -57,6 +58,35 @@ export function candidateDefect(candidate: Candidate): CandidateDefect | null {
 const RISK_ORDER: Record<Candidate['risk'], number> = { low: 0, medium: 1, high: 2 };
 
 /**
+ * Concilia lo que la declaración dice con lo que el estado ya sabe.
+ *
+ * El journal guarda **dónde estamos**; la declaración es **qué hay que hacer**.
+ * Son dos hechos distintos y por eso viven en sitios distintos: el journal está
+ * fuera del repositorio porque es estado de ejecución, y la declaración está
+ * dentro porque es la intención de quien la escribe.
+ *
+ * Sin esto, el backlog se congela: `openMission` tomaba la misión del journal
+ * y la declaración no volvía a leerse nunca, así que añadir, repriorizar o
+ * dividir trabajo no llegaba ni al estado ni a la cadena. La cadena seguía
+ * encadenando el trabajo del día en que se creó el journal.
+ *
+ * La regla es de una línea: **la intención manda, el estado se conserva**. Lo
+ * declarado describe el trabajo; lo guardado describe la situación. Y el estado
+ * nunca se pisa desde la declaración, porque ahí vive la orden explícita del
+ * usuario: una misión pausada a propósito no se reactiva porque el fichero
+ * declare más trabajo.
+ */
+export function reconcileMission(declared: Mission, stored: Mission): Mission {
+  return {
+    ...declared,
+    status: stored.status,
+    reason: stored.reason,
+    driver: stored.driver ?? declared.driver,
+    driverAt: stored.driverAt ?? declared.driverAt,
+  };
+}
+
+/**
  * Decide la siguiente accion a partir del estado observable.
  *
  * Reglas, en orden de precedencia:
@@ -96,6 +126,44 @@ export function decide(snapshot: Snapshot): Decision {
     return decideRetry(snapshot, goal);
   }
 
+  // Con un objetivo activo no se crea otro: sigue trabajando. Un objetivo
+  // lento no es un objetivo parado —una compilacion larga o un test sin salida
+  // son actividad legitima—, y aparcar la mision por eso apaga trabajo que si
+  // avanza.
+  if (goal && goal.status === 'active') {
+    return { kind: 'wait', reason: 'goal activo: esperando a que termine' };
+  }
+
+  if (mission.maxGoals !== null && snapshot.goalsCreated >= mission.maxGoals) {
+    return {
+      kind: 'park',
+      reason: `limite administrativo de ${mission.maxGoals} Goals alcanzado; la mision sigue viva`,
+    };
+  }
+
+  const { eligible, rejected } = selectCandidates(snapshot);
+
+  // Un objetivo **bloqueado** no apaga la mision. Si hay frontera ejecutable,
+  // se sigue por otro lado: con la cola llena, esperar es la forma mas cara de
+  // perder un ciclo. El objetivo bloqueado queda registrado en el journal y su
+  // dependencia, anotada, para que la recuperacion lo encuentre despues.
+  //
+  // Solo `blocked`. Ni `paused` ni los estados de cuota se esquivan: pausar es
+  // decision de alguien y `budget_limited` es un limite real del host, asi que
+  // ambos siguen esperando —la cuota tiene su propia via, el reintento con mas
+  // presupuesto y tres intentos—. Cambiar de tarea no puede ser la manera de
+  // rodear un limite.
+  if (goal && goal.status === 'blocked' && eligible.length > 0) {
+    const siguiente = eligible[0]!;
+    return {
+      kind: 'create',
+      candidate: siguiente,
+      reason:
+        `el objetivo ${goal.goalId} esta bloqueado y no avanza; ` +
+        `se continua con otro trabajo de la frontera: ${siguiente.objective}`,
+    };
+  }
+
   if (goal && goal.status !== 'complete' && isStalled(snapshot)) {
     return {
       kind: 'park',
@@ -112,19 +180,6 @@ export function decide(snapshot: Snapshot): Decision {
       reason: `goal en estado ${goal.status}${reason}: se espera, es una decision de alguien y la cadena no la esquiva`,
     };
   }
-
-  if (goal && goal.status === 'active') {
-    return { kind: 'wait', reason: 'goal activo: esperando a que termine' };
-  }
-
-  if (mission.maxGoals !== null && snapshot.goalsCreated >= mission.maxGoals) {
-    return {
-      kind: 'park',
-      reason: `limite administrativo de ${mission.maxGoals} Goals alcanzado; la mision sigue viva`,
-    };
-  }
-
-  const { eligible, rejected } = selectCandidates(snapshot);
 
   if (eligible.length === 0) {
     const blocked = rejected.filter((r) => r.reason === 'prerrequisito-pendiente');
