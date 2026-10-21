@@ -23,6 +23,7 @@ import { loadTree, validateTree } from './adapters/tree.js';
 import { ensureWorkdir, treeDirFor } from './adapters/workdir.js';
 import { findMissionFile } from './plugin/mission-locator.js';
 import { nudgePromptPath, readNudgePrompt } from './plugin/nudge-prompt.js';
+import { releaseWatchLock, takeWatchLock } from './plugin/watch-lock.js';
 import {
   defaultMarketplaceDir,
   installPlugin,
@@ -629,12 +630,21 @@ function parseInterval(raw: unknown, fallback: number): number {
  * gasta turnos.
  */
 async function cmdWatch(values: Options): Promise<void> {
+  const candado = takeWatchLock();
+  if (!candado.tomado) {
+    console.log(`ya hay un reloj mirando las misiones (proceso ${candado.dueno}): no se levanta otro`);
+    return;
+  }
+  const cerrar = () => releaseWatchLock();
+  process.on('exit', cerrar);
+
   const cada = parseInterval(values.every ?? values.interval, DEFAULT_WATCH_INTERVAL_MS);
   const verbose = values.quiet === undefined;
   const todas = values.all !== undefined;
   const misiones = todas ? todasLasMisiones() : [requireMissionId(values)];
   if (misiones.length === 0) {
     console.log('no hay ninguna mision declarada todavia');
+    releaseWatchLock();
     return;
   }
 
