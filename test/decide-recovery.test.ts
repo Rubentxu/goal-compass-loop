@@ -43,13 +43,47 @@ describe('un objetivo bloqueado no aparca la mision si hay trabajo', () => {
     expect(decision.reason).toContain('otro');
   });
 
-  it('pero un objetivo pausado no se esquiva: pausar es decision de alguien', () => {
-    // La propiedad que importa no es si espera o aparca: es que nunca se crea
-    // otro trabajo por encima de una pausa. Un objetivo pausado puede quedar
-    // dormido, pero no se ignora.
+  it('un objetivo pausado tampoco apaga la cadena, porque pausar no siempre es de alguien', () => {
+    // Antes se daba por hecho que si: un objetivo pausado era una decision
+    // humana y la cadena esperaba. Pero el host tambien pausa —deja el objetivo
+    // en pausa mientras valida un cierre— y ahi no hay nadie esperando: la
+    // cadena se queda mirando un trabajo que no vuelve solo, con la cola llena.
+    //
+    // La distincion no es el estado del objetivo, sino quien retiene la
+    // mision. Eso ya lo decide la mision, y esas reglas se comprueban antes de
+    // llegar aqui: si alguien ha parado la cadena, no se encadena nada.
     const decision = bloqueoConFrontera('paused');
 
-    expect(decision.kind).not.toBe('create');
+    expect(decision.kind).toBe('create');
+    if (decision.kind === 'create') {
+      expect(decision.candidate.candidateId).toBe('otro');
+    }
+  });
+
+  it('pero con la mision en manos de alguien, un objetivo pausado si se respeta', () => {
+    const decision = decide(
+      aSnapshot({
+        mission: aMission({ status: 'paused_by_user' }),
+        goal: aGoal({ status: 'paused' }),
+        candidates: [aCandidate()],
+      }),
+    );
+
+    expect(decision.kind).toBe('wait');
+  });
+
+  it('un objetivo pausado sin trabajo elegible se aparca, no espera en silencio', () => {
+    const decision = decide(
+      aSnapshot({
+        goal: aGoal({ status: 'paused' }),
+        candidates: [],
+        mission: aMission({ stallTimeoutMs: 60_000 }),
+        goalProgressSince: SIN_PROGRESAR,
+        now: AHORA,
+      }),
+    );
+
+    expect(decision.kind).toBe('park');
     expect(decision.reason).toContain('paused');
   });
 

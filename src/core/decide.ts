@@ -6,6 +6,7 @@
  */
 import {
   BUDGET_EXHAUSTED_GOAL_STATUSES,
+  SKIPPABLE_GOAL_STATUSES,
   MAX_BUDGET_ATTEMPTS,
   NON_SUCCESS_GOAL_STATUSES,
   candidateKey,
@@ -143,23 +144,32 @@ export function decide(snapshot: Snapshot): Decision {
 
   const { eligible, rejected } = selectCandidates(snapshot);
 
-  // Un objetivo **bloqueado** no apaga la mision. Si hay frontera ejecutable,
-  // se sigue por otro lado: con la cola llena, esperar es la forma mas cara de
-  // perder un ciclo. El objetivo bloqueado queda registrado en el journal y su
+  // Un objetivo que no avanza no apaga la mision. Si hay frontera ejecutable, se
+  // sigue por otro lado: con la cola llena, esperar es la forma mas cara de
+  // perder un ciclo. El objetivo queda registrado en el journal y su
   // dependencia, anotada, para que la recuperacion lo encuentre despues.
   //
-  // Solo `blocked`. Ni `paused` ni los estados de cuota se esquivan: pausar es
-  // decision de alguien y `budget_limited` es un limite real del host, asi que
-  // ambos siguen esperando —la cuota tiene su propia via, el reintento con mas
-  // presupuesto y tres intentos—. Cambiar de tarea no puede ser la manera de
-  // rodear un limite.
-  if (goal && goal.status === 'blocked' && eligible.length > 0) {
+  // `blocked` y `paused`. La pausa entra aqui porque **no significa siempre
+  // que alguien la ordeno**: el host tambien pausa, dejando el objetivo en esa
+  // situacion mientras valida un cierre, y ahi no hay nadie a quien esperar —
+  // el trabajo no vuelve solo y la cadena se queda con la cola llena y las manos
+  // quietas. Antes se daba por hecho que si, y la cadena se apagaba sola.
+  //
+  // Quien retiene la cadena no es el objetivo, es la mision, y eso ya se ha
+  // comprobado mas arriba: si alguien ha pausado o detenido la cadena, se
+  // devuelve sin mirar el objetivo. Asi que lo que llega aqui es una pausa que
+  // nadie ha ordenado, y saltarsela no es rodear un limite de nadie.
+  //
+  // Los estados de cuota siguen esperando: `budget_limited` es un limite real
+  // del host y tiene su propia via, el reintento con mas presupuesto y tres
+  // intentos. Cambiar de tarea no puede ser la manera de rodear un limite.
+  if (goal && esSaltable(goal.status) && eligible.length > 0) {
     const siguiente = eligible[0]!;
     return {
       kind: 'create',
       candidate: siguiente,
       reason:
-        `el objetivo ${goal.goalId} esta bloqueado y no avanza; ` +
+        `el objetivo ${goal.goalId} esta ${goal.status} y no avanza; ` +
         `se continua con otro trabajo de la frontera: ${siguiente.objective}`,
     };
   }
@@ -204,6 +214,11 @@ export function decide(snapshot: Snapshot): Decision {
     candidate: best,
     reason: best.whyNow || `candidato elegido por prioridad (${best.priority})`,
   };
+}
+
+/** Si ese estado del objetivo deja pasar a otro trabajo de la frontera. */
+function esSaltable(status: GoalState['status']): boolean {
+  return (SKIPPABLE_GOAL_STATUSES as readonly string[]).includes(status);
 }
 
 /**

@@ -19,6 +19,7 @@ import { mkdirSync, rmSync, realpathSync, appendFileSync, statSync } from 'node:
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AcpGoalAdapter } from '../adapters/acp-goal.js';
+import { AcpTimeoutError } from '../adapters/acp-transport.js';
 import type { GoalState } from '../core/types.js';
 import { parseKeeperRequest, type KeeperRequest, type KeeperResponse } from './keeper-protocol.js';
 import type { Logger } from '../ports.js';
@@ -62,6 +63,16 @@ const GOAL_FRESH_MS = 10_000;
  */
 const READY_WAIT_MS = 1_500;
 
+/**
+ * Margen para cargar la sesion en el host.
+ *
+ * Es generoso a proposito —leer todo el historial de una sesion larga lleva su
+ * tiempo— y aun asi no es infinito: si no cabe, hay que enterarse pronto y
+ * devolverse, no quedarse esperando indefinidamente a un trabajo que ya se sabe
+ * que no va a llegar.
+ */
+const LOAD_TIMEOUT_MS = 120_000;
+
 /** Espera entre intentos de cargar la sesion. */
 const RETRY_DELAY_MS = 1_000;
 
@@ -80,6 +91,11 @@ const MAX_LIFETIME_MS = 6 * 60 * 60_000;
 /** Tope de una pregunta al host, con el margen que se le quiera dar. */
 function readTimeoutMs(): number {
   return readNumber('GOAL_COMPASS_KEEPER_READ_MS') ?? GOAL_READ_TIMEOUT_MS;
+}
+
+/** Margen para cargar la sesion, que es lo unico que puede no caber. */
+function loadTimeoutMs(): number {
+  return readNumber('GOAL_COMPASS_KEEPER_LOAD_MS') ?? LOAD_TIMEOUT_MS;
 }
 
 function readNumber(name: string): number | undefined {
@@ -199,6 +215,7 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
       // El host avisa de cada cambio del objetivo. Ese aviso es lo que
       // permite que el proceso vivo sepa cual es sin preguntar, y preguntar
       // es lo que se queda colgado mientras el host esta ocupado.
+      loadTimeoutMs: loadTimeoutMs(),
       onGoalUpdate: (event) => {
         if (event.sessionId !== sessionId) return;
         remember(event.goal ?? null);
@@ -231,6 +248,21 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
       } catch (err) {
         await candidate.close().catch(() => {});
         failure = (err as Error).message;
+
+        // No ha dado tiempo, no es que el host haya fallado. Cargar la sesion
+        // cuesta lo que cuesta segun el historial, y repetir la misma carga con
+        // el mismo margen sobre los mismos datos devuelve lo mismo: cinco
+        // minutos de reloj para leer la misma respuesta cinco veces. Rendirse
+        // aqui es tambien lo mas rapido —el hook tiene su camino de reserva, y
+        // en cuanto se apague este proceso lo usa.
+        if (err instanceof AcpTimeoutError) {
+          logger.warn(
+            `la sesion no cabe en el margen (${err.limit}ms): no se reintenta, ` +
+              'que repetirla daria el mismo resultado',
+          );
+          await shutdown();
+          return;
+        }
         // Hay sesiones que el host no deja abrir a nadie: las de subagente.
         // Reintentar no sirve de nada, asi que el proceso vivo se apaga.
         if (isInternalSession(failure)) {

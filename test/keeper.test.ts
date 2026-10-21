@@ -262,6 +262,25 @@ describe('proceso vivo', () => {
     await adapter.close();
   }, 20_000);
 
+  it('una carga que no cabe no se reintenta: repetir da el mismo resultado', async () => {
+    // Cargar la sesion cuesta lo que cuesta el historial, y el margen existe
+    // justamente para decir "no cabe". Cuando se pasa, reintentar es volver a
+    // pedir lo mismo con el mismo margen sobre los mismos datos: cinco
+    // minutos de reloj para leer cinco veces la misma respuesta, y el turno
+    // entero por delante. Rendirse es tambien lo mas rapido, porque en cuanto
+    // el proceso se apaga el hook usa su camino de reserva.
+    const sessionId = 'mvs_vivo';
+    const socketPath = startKeeper(sessionId, {
+      FAKE_ACP_LOAD_DELAY_MS: '30000',
+      GOAL_COMPASS_KEEPER_LOAD_MS: '300',
+    });
+    expect(await waitFor(() => existsSync(socketPath))).toBe(true);
+
+    // Un solo intento, no cinco: si tardase lo que tardan cinco, el proceso
+    // seguiria aqui cuando vuelve el ciclo del socket.
+    expect(await waitFor(() => !existsSync(socketPath), 3_000)).toBe(true);
+  }, 20_000);
+
   it('se retira cuando el plugin de debajo ya no es el suyo', async () => {
     // Este proceso vive horas con la sesion cargada. Si el plugin se actualiza
     // mientras tanto, seguir sirviendo deja la cadena decidiendo con el codigo

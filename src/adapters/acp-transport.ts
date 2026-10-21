@@ -60,6 +60,26 @@ interface PendingCall {
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
+ * El host no contesto dentro del margen.
+ *
+ * Distinto de otros fallos a proposito: no es que este caido ni que no acepte
+ * la peticion, es que no ha dado tiempo. Repetir la misma peticion con el mismo
+ * margen sobre los mismos datos devuelve lo mismo, asi que quien recibe esto
+ * puede decidir sin adivinar si reintentar sirve de algo.
+ */
+export class AcpTimeoutError extends Error {
+  readonly method: string;
+  readonly limit: number;
+
+  constructor(method: string, limit: number) {
+    super(`el host ACP no respondio a ${method} en ${limit}ms`);
+    this.name = 'AcpTimeoutError';
+    this.method = method;
+    this.limit = limit;
+  }
+}
+
+/**
  * Conexion con un host ACP sobre la entrada y salida estandar de un proceso.
  *
  * Solo hay una conexion por proceso: es el dueno exclusivo de su sesion, y su
@@ -135,7 +155,7 @@ export class AcpTransport {
       this.options.logger.error(
         `el host ACP no respondio a ${method} en ${limit}ms: se sigue sin esa respuesta`,
       );
-      call.reject(new Error(`el host ACP no respondio a ${method}`));
+      call.reject(new AcpTimeoutError(method, limit));
     }, limit);
     timer.unref?.();
 

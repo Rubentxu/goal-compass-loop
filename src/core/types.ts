@@ -44,6 +44,16 @@ export const BUDGET_EXHAUSTED_GOAL_STATUSES: readonly GoalStatus[] = [
  * decidir que hacer —reintentar, desbloquear o cambiar de tarea— sin volver a
  * perderlos de vista.
  */
+/**
+ * Estados en los que un objetivo que no avanza deja paso a otro trabajo.
+ *
+ * Bloqueado y pausado. Pausar parece decision de alguien, pero tambien lo es
+ * el host pausing un objetivo mientras valida su cierre, y en ese caso no hay
+ * nadie esperando: el trabajo no vuelve solo. Quien retiene la cadena es la
+ * mision, y eso se comprueba aparte.
+ */
+export const SKIPPABLE_GOAL_STATUSES = ['blocked', 'paused'] as const;
+
 export const TERMINAL_GOAL_STATUSES: readonly GoalStatus[] = [
   'complete',
   ...NON_SUCCESS_GOAL_STATUSES,

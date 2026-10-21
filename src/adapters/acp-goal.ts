@@ -44,6 +44,8 @@ export interface AcpGoalOptions {
   sessionId?: string | undefined;
   /** Milisegundos que una peticion puede esperar antes de darse por perdida. */
   requestTimeoutMs?: number;
+  /** Margen para cargar la sesion, si se quiere distinto del general. */
+  loadTimeoutMs?: number;
   /** Callback de notificaciones de Goal. */
   onGoalUpdate?: (event: GoalUpdateEvent) => void;
   /** Callback de cualquier notificacion, para trazas. */
@@ -113,11 +115,18 @@ export class AcpGoalAdapter implements GoalAdapter {
     this.assertGoalExtension(init._meta);
 
     if (this.options.sessionId) {
-      await transport.request('session/load', {
-        sessionId: this.options.sessionId,
-        cwd: this.options.workspace,
-        mcpServers: [],
-      });
+      // Cargar la sesion lleva su propio margen: es la operacion cara, la que
+      // crece con el historial, y la unica que puede no caber. Mezclarla con el
+      // resto impediria ajustarla sin arrastrar a las demas.
+      await transport.request(
+        'session/load',
+        {
+          sessionId: this.options.sessionId,
+          cwd: this.options.workspace,
+          mcpServers: [],
+        },
+        this.options.loadTimeoutMs,
+      );
       this.activeSessionId = this.options.sessionId;
       this.options.logger.info(`sesion reanudada: ${this.activeSessionId}`);
     } else {

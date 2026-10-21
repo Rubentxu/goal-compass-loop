@@ -25,10 +25,13 @@ describe('decide · nucleo puro', () => {
     expect(decision.kind).toBe('wait');
   });
 
-  // Pausar es decision de alguien y la cuota es un limite real del host: en
-  // ninguno de los dos casos se esquiva creando otro Goal. `blocked` si es
-  // distinto —el objetivo se atasco solo— y tiene su propia regla mas abajo.
-  it.each(['paused', 'budget_limited', 'usage_limited'] as const)(
+  // La cuota es un limite real del host y no se esquiva cambiando de tarea: tiene
+  // su propia via, el reintento con mas presupuesto. `paused` estaba aqui
+  // tambien, dando por hecho que pausar siempre es decision de alguien, y no lo
+  // es —el host pausa un objetivo mientras valida su cierre— asi que una pausa
+  // sin nadie detras apagaba la cadena. Ahora la resuelve la regla de la
+  // frontera, y lo que protege la pausa de verdad es quien retiene la mision.
+  it.each(['budget_limited', 'usage_limited'] as const)(
     'no esquiva el limite %s creando otro Goal',
     (status) => {
       const decision = decide(

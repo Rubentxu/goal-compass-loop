@@ -30,8 +30,9 @@ const NOW = 1_700_000_000_000;
 const STALL_MS = 60_000;
 const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 
-class StaticCandidates implements CandidatePort {
-  constructor(private readonly list: Candidate[]) {}
+/** Backlog que puede cambiar entre ciclos, como el que escribe quien declara. */
+class CandidatesQueCambian implements CandidatePort {
+  list: Candidate[] = [];
   async discover(): Promise<Candidate[]> {
     return this.list;
   }
@@ -58,20 +59,24 @@ function unReloj(): Clock & { avanzar(ms: number): void } {
   };
 }
 
+/** Sin trabajo elegible la mision se aparca: esa sigue siendo una via real. */
 function construir(candidatos: Candidate[]): {
   supervisor: Supervisor;
   host: MemoryGoalHost;
   journal: JournalQueCuenta;
   control: MemoryControl;
   reloj: Clock & { avanzar(ms: number): void };
+  backlog: CandidatesQueCambian;
 } {
   const host = new MemoryGoalHost();
   const journal = new JournalQueCuenta(anEmptyJournal(aMission({ stallTimeoutMs: STALL_MS })));
   const control = new MemoryControl();
   const reloj = unReloj();
+  const backlog = new CandidatesQueCambian();
+  backlog.list = candidatos;
   const supervisor = new Supervisor({
     goalPort: host,
-    candidatePort: new StaticCandidates(candidatos),
+    candidatePort: backlog,
     journalPort: journal,
     chainLock: { acquire: () => unCandado() },
     controlPort: control,
@@ -81,7 +86,7 @@ function construir(candidatos: Candidate[]): {
     parkedPollIntervalMs: 1,
     maxIterations: 1,
   });
-  return { supervisor, host, journal, control, reloj };
+  return { supervisor, host, journal, control, reloj, backlog };
 }
 
 const estadoDe = (journal: MemoryJournal): MissionStatus => journal.state.mission.status;
@@ -99,7 +104,7 @@ function objetivo(chain: MemoryGoalHost, overrides: Partial<GoalState> = {}): vo
 
 describe('una mision aparcada se despierta cuando deja de estarlo', () => {
   it('se despierta cuando el objetivo que la aparco vuelve a trabajar', async () => {
-    const { supervisor, host, journal, reloj } = construir([aCandidate()]);
+    const { supervisor, host, journal, reloj } = construir([]);
 
     // Un objetivo que no avanza: la mision se aparca.
     objetivo(host, { status: 'paused' });
@@ -116,7 +121,7 @@ describe('una mision aparcada se despierta cuando deja de estarlo', () => {
   });
 
   it('deja de mentir sobre por que estaba aparcada', async () => {
-    const { supervisor, host, journal, reloj } = construir([aCandidate()]);
+    const { supervisor, host, journal, reloj } = construir([]);
 
     objetivo(host, { status: 'paused' });
     await supervisor.run();
@@ -131,7 +136,7 @@ describe('una mision aparcada se despierta cuando deja de estarlo', () => {
   });
 
   it('sigue aparcada mientras el motivo se siga cumpliendo', async () => {
-    const { supervisor, host, journal, reloj } = construir([aCandidate()]);
+    const { supervisor, host, journal, reloj } = construir([]);
 
     objetivo(host, { status: 'paused' });
     await supervisor.run();
@@ -147,22 +152,25 @@ describe('una mision aparcada se despierta cuando deja de estarlo', () => {
   });
 
   it('se despierta cuando vuelve a haber trabajo que encadenar', async () => {
-    const { supervisor, host, journal, reloj } = construir([aCandidate()]);
-
-    objetivo(host, { status: 'paused' });
-    await supervisor.run();
-    reloj.avanzar(STALL_MS + 1);
-    await supervisor.run();
-    expect(estadoDe(journal)).toBe('parked');
+    // Aparca porque no hay nada que encadenar: el objetivo anterior esta
+    // cerrado y la cola vacia. Despues alguien deja trabajo, y una mision
+    // aparcada tiene que recogerse en vez de quedarse dormida con la cola ya
+    // llena. Es la forma de dormir y la de despertar que se dan de verdad.
+    const { supervisor, host, journal, backlog } = construir([]);
 
     objetivo(host, { status: 'complete' });
     await supervisor.run();
+    expect(estadoDe(journal)).toBe('parked');
+
+    backlog.list = [aCandidate()];
+    await supervisor.run();
 
     expect(estadoDe(journal)).toBe('running');
+    expect(host.createCount).toBe(1);
   });
 
   it('una pausa del usuario no se despierta: esa orden es suya', async () => {
-    const { supervisor, host, journal, control } = construir([aCandidate()]);
+    const { supervisor, host, journal, control } = construir([]);
 
     objetivo(host);
     await supervisor.run();
@@ -173,7 +181,7 @@ describe('una mision aparcada se despierta cuando deja de estarlo', () => {
   });
 
   it('una mision detenida por el usuario no se despierta', async () => {
-    const { supervisor, host, journal, control, reloj } = construir([aCandidate()]);
+    const { supervisor, host, journal, control, reloj } = construir([]);
 
     objetivo(host);
     await supervisor.run();
@@ -187,7 +195,7 @@ describe('una mision aparcada se despierta cuando deja de estarlo', () => {
 
 describe('el rastro de la mision aparcada cuenta como esta', () => {
   it('guarda el motivo por el que se aparco', async () => {
-    const { supervisor, host, journal, reloj } = construir([aCandidate()]);
+    const { supervisor, host, journal, reloj } = construir([]);
 
     objetivo(host, { status: 'paused' });
     await supervisor.run();
@@ -200,7 +208,7 @@ describe('el rastro de la mision aparcada cuenta como esta', () => {
   });
 
   it('esperando quieto no reescribe el estado en cada ciclo', async () => {
-    const { supervisor, host, journal, reloj } = construir([aCandidate()]);
+    const { supervisor, host, journal, reloj } = construir([]);
 
     objetivo(host, { status: 'paused' });
     await supervisor.run();
