@@ -15,7 +15,7 @@
  * cerrar a mano cuando la sesion se acaba.
  */
 import { createServer, type Socket } from 'node:net';
-import { mkdirSync, rmSync, realpathSync, appendFileSync } from 'node:fs';
+import { mkdirSync, rmSync, realpathSync, appendFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AcpGoalAdapter } from '../adapters/acp-goal.js';
@@ -77,6 +77,26 @@ function readNumber(name: string): number | undefined {
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/**
+ * Firma del codigo que hay ahora mismo en el fichero del que arranco.
+ *
+ * Este proceso esta pensado para vivir horas con la sesion cargada. Si el plugin
+ * se actualiza mientras tanto, seguir answering deja la cadena decidiendo con el
+ * codigo de antes: lo que se acaba de arreglar no se nota hasta el siguiente
+ * reinicio, y entonces parece que la correccion no funcionaba. El momento en
+ * que se escribio el fichero es la senal mas barata de que el codigo de debajo
+ * ya no es el suyo.
+ */
+function codeSignature(): number | undefined {
+  const entry = process.argv[1];
+  if (!entry) return undefined;
+  try {
+    return statSync(entry).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface KeeperOptions {
   /** Sesion del agente: la que hay que tener cargada en el host. */
   sessionId: string;
@@ -116,6 +136,8 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
    * crear un objetivo que ya existe.
    */
   let cachedGoal: GoalState | null | undefined;
+  /** El codigo con el que arranca este proceso: si cambia, el proceso se va. */
+  const firmaAlArrancar = codeSignature();
   /** Cuando se comprobo por ultima vez lo que hay en el cache. */
   let cachedAt = 0;
   /** Hay una comprobacion en marcha: no se apilan. */
@@ -240,6 +262,12 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
       goal: () => cachedGoal,
       setGoal: remember,
       revalidate,
+      isStaleCode: () => {
+        const firma = codeSignature();
+        // Sin firma no hay nada que comparar: mejor seguir sirviendo que
+        // retirarse por no saber.
+        return firma !== undefined && firmaAlArrancar !== undefined && firma !== firmaAlArrancar;
+      },
       shutdown,
     });
   });
@@ -350,6 +378,8 @@ interface ConnectionContext {
   setGoal: (goal: GoalState | null | undefined) => void;
   /** Pide al host una comprobacion en segundo plano si lo que hay envejecio. */
   revalidate: () => void;
+  /** Si el plugin de debajo ya no es el que arranco este proceso. */
+  isStaleCode: () => boolean;
   shutdown: () => Promise<void>;
 }
 
@@ -385,6 +415,17 @@ async function answer(line: string, socket: Socket, context: ConnectionContext):
     write(socket, { ok: true });
     // El cierre va despues de responder: quien lo pidio tiene que recibir la
     // respuesta antes de que el socket se cierre.
+    setTimeout(() => {
+      void context.shutdown();
+    }, 50);
+    return;
+  }
+
+  if (context.isStaleCode()) {
+    write(socket, { ok: false, error: 'el proceso vivo se retira: el plugin cambio' });
+    // La retirada va despues de responder, igual que el cierre: quien lo pidio
+    // tiene que enterarse de que no se le va a atender antes de que se le vaya
+    // el socket. Retirado el socket, el hook vuelve a su camino de reserva.
     setTimeout(() => {
       void context.shutdown();
     }, 50);

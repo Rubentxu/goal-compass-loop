@@ -12,7 +12,7 @@
  */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cleanupTempDirs, tempDir } from './support/temp.js';
@@ -218,6 +218,44 @@ describe('proceso vivo', () => {
       despues = await adapter.read(sessionId);
     }
     expect(despues?.status).toBe('active');
+
+    await adapter.close();
+  }, 20_000);
+
+  it('se retira cuando el plugin de debajo ya no es el suyo', async () => {
+    // Este proceso vive horas con la sesion cargada. Si el plugin se actualiza
+    // mientras tanto, seguir sirviendo deja la cadena decidiendo con el codigo
+    // de antes: lo que se acaba de arreglar no se nota hasta el reinicio, y
+    // entonces parece que la correccion no servia. Retirandose deja el socket
+    // fuera, el hook vuelve a su camino de reserva y el siguiente arranque trae
+    // el codigo nuevo.
+    const sessionId = 'mvs_vivo';
+    const socketPath = startKeeper(sessionId, { FAKE_ACP_SEED_GOAL: 'active' });
+    expect(await waitFor(() => existsSync(socketPath))).toBe(true);
+
+    const adapter = new KeeperGoalAdapter({
+      sessionId,
+      socketPath,
+      logger: quietLogger,
+      requestTimeoutMs: 5_000,
+    });
+    await adapter.start();
+    expect((await adapter.read(sessionId))?.status).toBe('active');
+
+    // Solo cambia cuando se escribio el fichero, no su contenido.
+    const antes = statSync(KEEPER).mtimeMs;
+    const ahora = new Date(antes + 60_000);
+    utimesSync(KEEPER, ahora, ahora);
+
+    let fallo: string | undefined;
+    try {
+      await adapter.read(sessionId);
+    } catch (err) {
+      fallo = (err as Error).message;
+    }
+
+    expect(fallo).toBeTruthy();
+    expect(await waitFor(() => !existsSync(socketPath))).toBe(true);
 
     await adapter.close();
   }, 20_000);
