@@ -363,7 +363,7 @@ describe('el hook como proceso', () => {
     writeFileSync(join(mudo, 'mcode'), '#!/bin/sh\nsleep 300\n', { mode: 0o755 });
 
     const { code, elapsed } = await runHookProcess(workspace, mudo, {
-      GOAL_COMPASS_REQUEST_TIMEOUT_MS: '2000',
+      GOAL_COMPASS_REQUEST_TIMEOUT_MS: '300',
     });
 
     expect(code).toBe(0);

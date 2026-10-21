@@ -157,12 +157,13 @@ describe('proceso vivo', () => {
     const sessionId = 'mvs_vivo';
     const socketPath = startKeeper(sessionId, {
       FAKE_ACP_SEED_GOAL: 'active',
-      FAKE_ACP_FREEZE_AFTER_MS: '1500',
+      FAKE_ACP_FREEZE_AFTER_MS: '250',
+      GOAL_COMPASS_KEEPER_READ_MS: '150',
     });
     expect(await waitFor(() => existsSync(socketPath))).toBe(true);
     // Se espera a que el proceso vivo cargue la sesion y a que el host se
     // congele: a partir de ese momento, preguntar no devuelve nada.
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await new Promise((resolve) => setTimeout(resolve, 600));
 
     const adapter = new KeeperGoalAdapter({
       sessionId,
@@ -325,7 +326,12 @@ describe('proceso vivo', () => {
       ],
       {
         cwd: process.cwd(),
-        env: { ...process.env, XDG_STATE_HOME: stateHome, FAKE_ACP_FAIL: 'session/load' },
+        env: {
+          ...process.env,
+          XDG_STATE_HOME: stateHome,
+          FAKE_ACP_FAIL: 'session/load',
+          GOAL_COMPASS_KEEPER_RETRY_MS: '80',
+        },
         stdio: 'ignore',
       },
     );

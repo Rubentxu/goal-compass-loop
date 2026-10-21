@@ -45,6 +45,22 @@ const RETRY_DELAY_MS = 1_000;
 /** Vida maxima del proceso vivo cuando no se sabe quien lo lanzo. */
 const MAX_LIFETIME_MS = 6 * 60 * 60_000;
 
+/**
+ * Un numero del entorno, si lo hay.
+ *
+ * Las esperas de este proceso son de varios segundos porque en produccion
+ * compiten con un host ocupado. Verificarlas asi cuesta segundos de reloj por
+ * cada prueba y hace que el conjunto se mida mal: una garantia de un segundo
+ * se demuestra con un segundo. Con la variable se demuestra lo mismo pagando la
+ * decima parte. En produccion, sin la variable, los valores son los de arriba.
+ */
+function readNumber(name: string): number | undefined {
+  const raw = process.env[name];
+  if (!raw || !raw.trim()) return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 export interface KeeperOptions {
   /** Sesion del agente: la que hay que tener cargada en el host. */
   sessionId: string;
@@ -135,7 +151,7 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
         logger.warn(
           `el proceso vivo no pudo cargar la sesion (intento ${attempt} de ${MAX_ATTEMPTS}): ${failure}`,
         );
-        if (attempt < MAX_ATTEMPTS) await delay(RETRY_DELAY_MS);
+        if (attempt < MAX_ATTEMPTS) await delay(readNumber('GOAL_COMPASS_KEEPER_RETRY_MS') ?? RETRY_DELAY_MS);
       }
     }
     // Agotados los intentos, el proceso vivo no puede hacer su trabajo: se
@@ -371,7 +387,10 @@ async function serveOnHost(
       // seria afirmar algo que no se sabe, y podria crear un objetivo que ya
       // existe.
       try {
-        const goal = await withTimeout(adapter.read(sessionId), GOAL_READ_TIMEOUT_MS);
+        const goal = await withTimeout(
+          adapter.read(sessionId),
+          readNumber('GOAL_COMPASS_KEEPER_READ_MS') ?? GOAL_READ_TIMEOUT_MS,
+        );
         context.setGoal(goal);
         return { ok: true, goal };
       } catch (err) {
