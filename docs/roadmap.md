@@ -526,3 +526,71 @@ el usuario abre en el navegador, con el estado del ciclo en vivo.
 
 **Alcance.** `src/plugin/mcp-server.ts`, `src/plugin/auto-continue.ts`,
 `skill/goal-compass/SKILL.md`.
+
+---
+
+<a id="p15"></a>
+
+## 15 · El director autónomo (H0–H5)
+
+**Prioridad:** máxima · **Estado:** pendiente · **Desbloquea:** que la cadena
+llegue sola al final del roadmap
+
+**Diseño completo:** [`spec/docs/16-director-autonomo.md`](../spec/docs/16-director-autonomo.md).
+Esta sección es el resumen y el índice; el spec es la referencia.
+
+**El hueco.** La decisión más frecuente de la cadena hoy es detenerse. Un objetivo
+que acaba en `blocked` o `paused` devuelve `wait` y ahí se queda; cuando no
+queda candidato elegible devuelve `park` y la misión queda viva pero dormida
+aunque el roadmap tenga trabajo detrás. El sentido del plugin es el contrario:
+continuar hasta acabar el roadmap y la deuda.
+
+**El invariante.** Si la misión tiene trabajo pendiente, el sistema debe poder
+demostrar una de dos cosas: que ejecuta una acción que contribuye a completarlo,
+o qué **condición externa verificable** impide cualquier acción autorizada. Una
+tarea bloqueada nunca justifica por sí sola detener la misión completa.
+
+**Las tres situaciones.** Hay trabajo realizable → continuar con el mejor
+candidato. Un trabajo está bloqueado → recuperar: investigar, descomponer, cambiar
+de estrategia o **elegir otro trabajo**. No existe ninguna acción autorizada y
+realizable → esperar una condición externa, conservando la misión.
+
+Las órdenes explícitas de detener o pausar, los permisos y las cuotas reales se
+respetan siempre. Ser autónomo no es poder ignorarlos.
+
+**Lo que no se toca.** El supervisor ACP, la skill con frontmatter, el grafo, los
+adaptadores y el journal siguen siendo la base. Lo que cambia es la política que
+los conecta, más el árbol de este proyecto —ya escrito en `.goal-compass/`— y el
+journal, que además de Goals guardará decisiones y experimentos.
+
+**Los hitos.**
+
+| Hito | Versión | Alcance | Aceptación |
+|---|---|---|---|
+| **H0** | v0.15.0 | Cerrar P0/P1: lockfile, conciliación de estados, keeper, control, recuperación | Un Goal recupera su estado sin duplicar y el producto instala limpio |
+| **H1** | v0.16.0 | Selector que busca alternativas y desbloqueos antes de esperar | Una tarea bloqueada con trabajo alternativo nunca paraliza la misión |
+| **H2** | v0.17.0 | Árbol YAML ejecutable: señales tipadas, resultados estructurados, rutas de recuperación | El agente sigue caminos distintos según evidencia observable |
+| **H3** | v0.18.0 | Roadmap agent-first: consultar, modificar, priorizar, descomponer y cerrar desde prompts | El agente modifica el roadmap y demuestra por qué cada tarea nueva pertenece a la misión |
+| **H4** | v0.19.0 | Experimentos con evaluación y memoria, crítica independiente, replanificación | Un fallo o una investigación fallida produce conocimiento o estrategia nueva, no un ciclo repetido |
+| **H5** | v0.20.0 | Modo persistente opcional, recuperación entre sesiones, auditoría global, publicación gobernada | Completar un roadmap de varios hitos con reinicios, cambios de prioridad, entregas y comprobación final |
+
+H0 y H1 son el cambio decisivo: pasar de un plugin que interpreta «no puedo
+ejecutar el siguiente Goal» como una razón para esperar, a uno que pregunta
+sistemáticamente «qué tengo que averiguar, corregir o reorganizar para poder
+continuar». H3 y H4 lo convierten en un sistema agent-first de planificación;
+H5 le da persistencia más allá de una sesión.
+
+**Defectos concretos que ya están observados y son de H0.**
+
+- `src/runtime.ts:158` — `existing?.mission ?? toMission(config)`: en cuanto hay
+  journal, la misión sale de ahí y **la declaración nunca se vuelve a leer**. El
+  backlog queda congelado el día que se creó el journal; añadir o repriorizar un
+  candidato no llega ni al estado ni a la cadena.
+- `src/adapters/candidates.ts:32` — el puerto recarga la declaración sin
+  `workspace`, lo que lanza, y el `catch` se come el error y cae al backlog del
+  journal. El mismo hueco por otro lado.
+
+**Nota de alcance.** El árbol de decisiones de este proyecto ya está escrito en
+`.goal-compass/` (11 nodos: `grill`, `spec`, `tickets`, `implement`, `review`,
+`unblock`, `finish`, `stop` y los dos nodos de control) y valida con
+`node dist/cli.js tree`. Lo que falta es que el runtime lo ejecute: H2.
