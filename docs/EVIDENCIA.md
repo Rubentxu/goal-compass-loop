@@ -2107,3 +2107,37 @@ comprobado dentro, donde se puede comprobar sin gastar un turno de agente. Lo
 que solo se puede ver contra el host de verdad se queda: encadenar varios
 objetivos, reconciliar una transición a medias, pausar, reintentar sin
 presupuesto y explorar.
+
+---
+
+## 20 · El diagnóstico que mandaba reinstalar lo que funcionaba
+
+**Síntoma.** El diagnóstico de la flota decía, de esta misión, que el plugin
+no estaba registrado, con la instrucción de reinstalarlo. El plugin estaba
+registrado: la cadena estaba encadenando, el hook estaba vivo y las
+herramientas respondían. El diagnóstico mandaba a reinstallar algo que
+funcionaba, y quien lo leía se iba a buscar un problema que no tenía.
+
+**Por qué.** El plugin se instala en el marketplace local del host, que es
+donde lo deja el instalador. El estado del host que el diagnóstico leía solo
+recoge los plugins del marketplace oficial. Un plugin local no aparece ahí, así
+que el diagnóstico no lo encontraba: no miraba donde estaba.
+
+**Qué se ha cambiado.** El registro se mira en los dos sitios. Si el plugin
+está en el marketplace local, el host lo puede cargar, diga lo que diga el
+estado oficial. Y cuando el host guarda la lista de plugins locales apagados,
+se mira también esa lista, para no decir «habilitado» de algo que está apagado.
+
+Lo que no cambia: si no se puede leer el estado del host, se sigue diciendo que
+no se sabe. Un diagnóstico que afirma que falta algo que no ha podido
+comprobar es peor que uno que calla.
+
+**Evidencia.**
+
+```text
+ANTES    plugin: no esta registrado: registralo con `goal-compass install-plugin`
+DESPUES  plugin: registrado y habilitado
+```
+
+La prueba que mira el marketplace local falla sin el arreglo: el diagnóstico
+decía que faltaba un plugin que estaba instalado al lado.

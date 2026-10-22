@@ -41,10 +41,27 @@ function runtimeDb(instalaciones: Array<{ name: string; installed?: boolean; ena
 }
 
 describe('el diagnostico sabe si el plugin esta registrado', () => {
+  it('lo ve registrado y habilitado cuando esta en el marketplace local', () => {
+    // El plugin se instala en el marketplace local del host. Su estado no
+    // aparece en el registro de plugins oficiales, asi que un diagnostico que
+    // solo mira ahi dice que no esta instalado cuando si lo esta, y manda a
+    // reinstalar algo que funciona.
+    const marketplace = tempDir('gcl-marketplace-');
+    mkdirSync(join(marketplace, 'goal-compass'), { recursive: true });
+    const path = runtimeDb([{ name: 'browser-use', installed: true, enabled: true }]);
+
+    const registro = pluginRegistration(path, marketplace);
+
+    expect(registro.installed).toBe(true);
+    expect(registro.enabled).toBe(true);
+    expect(registro.unknown).toBe(false);
+    expect(pluginRegistrationLine(registro)).toContain('registrado y habilitado');
+  });
+
   it('lo ve registrado y habilitado cuando el host lo tiene activo', () => {
     const path = runtimeDb([{ name: 'goal-compass', installed: true, enabled: true }]);
 
-    const registro = pluginRegistration(path);
+    const registro = pluginRegistration(path, tempDir('gcl-registro-'));
 
     expect(registro.installed).toBe(true);
     expect(registro.enabled).toBe(true);
@@ -55,7 +72,7 @@ describe('el diagnostico sabe si el plugin esta registrado', () => {
   it('lo ve instalado pero deshabilitado, y no lo confunde con que no este', () => {
     const path = runtimeDb([{ name: 'goal-compass', installed: true, enabled: false }]);
 
-    const registro = pluginRegistration(path);
+    const registro = pluginRegistration(path, tempDir('gcl-registro-'));
 
     expect(registro.installed).toBe(true);
     expect(registro.enabled).toBe(false);
@@ -65,7 +82,7 @@ describe('el diagnostico sabe si el plugin esta registrado', () => {
   it('lo ve ausente, y dice con que comando se arregla', () => {
     const path = runtimeDb([{ name: 'browser-use', installed: true, enabled: true }]);
 
-    const registro = pluginRegistration(path);
+    const registro = pluginRegistration(path, tempDir('gcl-registro-'));
 
     expect(registro.installed).toBe(false);
     expect(registro.enabled).toBe(false);
@@ -73,7 +90,10 @@ describe('el diagnostico sabe si el plugin esta registrado', () => {
   });
 
   it('si no se puede leer el estado del host, dice que no se sabe', () => {
-    const registro = pluginRegistration(join(tempDir('gcl-registro-vacio-'), 'no-existe.sqlite'));
+    const registro = pluginRegistration(
+      join(tempDir('gcl-registro-vacio-'), 'no-existe.sqlite'),
+      tempDir('gcl-registro-'),
+    );
 
     expect(registro.unknown).toBe(true);
     expect(pluginRegistrationLine(registro)).toContain('no se ha podido comprobar');
