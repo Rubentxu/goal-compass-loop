@@ -20,7 +20,7 @@ import { declareMission, loadMissionConfig } from './adapters/mission.js';
 import { auditDeclaration } from './adapters/declaration-audit.js';
 import { openMission, ensureMissionState } from './runtime.js';
 import { loadTree, validateTree } from './adapters/tree.js';
-import { ensureWorkdir, treeDirFor } from './adapters/workdir.js';
+import { ensureWorkdir, copyTreeFrom, treeDirFor } from './adapters/workdir.js';
 import { findMissionFile } from './plugin/mission-locator.js';
 import { nudgePromptPath, readNudgePrompt } from './plugin/nudge-prompt.js';
 import { releaseWatchLock, takeWatchLock } from './plugin/watch-lock.js';
@@ -81,6 +81,7 @@ function parse(argv: string[]): { values: Options; positionals: string[] } {
       budget: { type: 'string' },
       'total-budget': { type: 'string' },
       'allow-remote-write': { type: 'boolean' },
+      init: { type: 'boolean' },
       'poll-ms': { type: 'string' },
       every: { type: 'string' },
       prompt: { type: 'string' },
@@ -480,6 +481,16 @@ async function cmdTree(values: Options): Promise<void> {
   logger.info(`ignorado por git: ${workdir.ignored ? 'si' : 'no'}`);
 
   const fallback = join(resolveSkillSource(), 'graph');
+
+  // Partir de un arbol sin escribir las trece fichas: se copia el de la skill
+  // al directorio del proyecto y desde ahi el proyecto manda. Lo que ya
+  // estuviera escrito no se toca.
+  if (values.init === true) {
+    const copia = copyTreeFrom(fallback, workdir.path);
+    logger.info(`arbol del proyecto: ${workdir.path}`);
+    logger.info(`copiados: ${copia.copied.length} | sin tocar: ${copia.kept.length}`);
+  }
+
   const { dir, source } = treeDirFor(workspace, fallback);
   logger.info(`arbol: ${dir} (${source === 'proyecto' ? 'del proyecto' : 'de la skill'})`);
 

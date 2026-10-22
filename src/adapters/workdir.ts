@@ -12,8 +12,9 @@
  * y se puede compartir si el proyecto quiere: git permite añadir a mano lo que
  * está ignorado.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { markdownFiles } from './tree.js';
 
 /** Nombre del subdirectorio de trabajo. */
 export const WORKDIR_NAME = '.goal-compass';
@@ -109,4 +110,42 @@ function hasNodes(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Lo que pasó al copiar un arbol. */
+export interface TreeCopyResult {
+  /** Ficheros copiados, con su ruta relativa. */
+  copied: string[];
+  /** Ficheros que ya estaban y se han dejado como estaban. */
+  kept: string[];
+}
+
+/**
+ * Copia el arbol de la skill al directorio del proyecto.
+ *
+ * Es la forma de partir de un arbol sin escribir las trece fichas a mano: se
+ * copia el de la skill y luego se edita lo que haga falta. Desde ese momento
+ * el proyecto manda sobre la skill.
+ *
+ * No pisa nada. Un nodo que ya esta escrito es del proyecto, no de la skill, y
+ * quien lo escribio lo hizo a proposito: se deja como esta y se dice. Lo
+ * unico que se copia es lo que no existe.
+ */
+export function copyTreeFrom(source: string, target: string): TreeCopyResult {
+  const copied: string[] = [];
+  const kept: string[] = [];
+
+  for (const file of markdownFiles(source)) {
+    const relativePath = relative(source, file);
+    const destino = join(target, relativePath);
+    if (existsSync(destino)) {
+      kept.push(relativePath);
+      continue;
+    }
+    mkdirSync(dirname(destino), { recursive: true });
+    copyFileSync(file, destino);
+    copied.push(relativePath);
+  }
+
+  return { copied, kept };
 }

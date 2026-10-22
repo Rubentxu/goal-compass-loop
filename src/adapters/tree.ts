@@ -194,7 +194,7 @@ export function entryNode(tree: DecisionTree): TreeNode {
 }
 
 /** Los markdown de un directorio, en cascada y ordenados. */
-function markdownFiles(dir: string): string[] {
+export function markdownFiles(dir: string): string[] {
   const found: string[] = [];
 
   const walk = (current: string): void => {
