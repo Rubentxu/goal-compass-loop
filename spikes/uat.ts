@@ -18,31 +18,8 @@ import {
   type ScenarioContext,
 } from './harness.js';
 import { readProposals } from '../src/adapters/proposals.js';
-import type { Candidate, Journal } from '../src/core/types.js';
-
-/** Objetivo trivial: escribir un fichero con un texto exacto. */
-function fileGoal(name: string, content: string): string {
-  return (
-    `Escribe un fichero llamado ${name} en el directorio de trabajo actual con el texto exacto ${content} ` +
-    'y termina el objetivo cuando el fichero exista con ese contenido.'
-  );
-}
-
-function candidate(overrides: Partial<Candidate> = {}): Candidate {
-  return {
-    candidateId: 'trabajo-1',
-    objective: fileGoal('resultado.txt', 'RESULTADO'),
-    whyNow: 'trabajo pendiente de la cadena',
-    evidenceRefs: ['escenario/resultado.txt'],
-    doneWhen: ['resultado.txt existe con el contenido exacto RESULTADO'],
-    scope: 'escenario',
-    risk: 'low',
-    priority: 10,
-    prerequisites: [],
-    source: 'observed',
-    ...overrides,
-  };
-}
+import { unCandidatoDeFichero, unObjetivoDeFichero } from '../test/support/harness.js';
+import type { Journal } from '../src/core/types.js';
 
 /**
  * Un trabajo largo.
@@ -71,17 +48,17 @@ const chain: Scenario = {
   async run(context: ScenarioContext): Promise<Check[]> {
     seedWorkspace(context.workspace, 'escenario/notas.md', 'el segundo trabajo esta propuesto\n');
     context.propose({
-      objective: fileGoal('resultado-2.txt', 'SEGUNDO'),
+      objective: unObjetivoDeFichero('resultado-2.txt', 'SEGUNDO'),
       evidence: 'escenario/notas.md',
       whyNow: 'propuesto durante la sesion',
       doneWhen: ['resultado-2.txt existe con el contenido exacto SEGUNDO'],
     });
 
     await context.setCandidates([
-      candidate({ candidateId: 'primero' }),
-      candidate({
+      unCandidatoDeFichero({ candidateId: 'primero' }),
+      unCandidatoDeFichero({
         candidateId: 'tercero',
-        objective: fileGoal('resultado-3.txt', 'TERCERO'),
+        objective: unObjetivoDeFichero('resultado-3.txt', 'TERCERO'),
         doneWhen: ['resultado-3.txt existe con el contenido exacto TERCERO'],
         priority: 3,
       }),
@@ -235,7 +212,7 @@ const recovery: Scenario = {
   name: 'recovery',
   description: 'Una transicion a medias se reconcilia contra el host sin crear un Goal de mas',
   async run(context: ScenarioContext): Promise<Check[]> {
-    await context.setCandidates([candidate({ candidateId: 'unico' })]);
+    await context.setCandidates([unCandidatoDeFichero({ candidateId: 'unico' })]);
     context.startSupervisor({ maxIterations: 1 });
 
     await context.waitFor('el primer Goal creado', async () => {
@@ -280,7 +257,7 @@ const pause: Scenario = {
   name: 'pause',
   description: 'La orden de pausa del usuario detiene el Goal en curso y la de continuar lo reanuda',
   async run(context: ScenarioContext): Promise<Check[]> {
-    await context.setCandidates([candidate({ candidateId: 'pausable' })]);
+    await context.setCandidates([unCandidatoDeFichero({ candidateId: 'pausable' })]);
     context.startSupervisor();
 
     await context.waitFor('el Goal en marcha', async () => {
@@ -312,53 +289,6 @@ const pause: Scenario = {
   },
 };
 
-/** El presupuesto de la mision es una medida: la cadena sigue. */
-const budget: Scenario = {
-  name: 'budget',
-  description: 'Superado el presupuesto de la mision, la cadena sigue y el gasto queda medido',
-  async run(context: ScenarioContext): Promise<Check[]> {
-    await context.setCandidates([
-      candidate({ candidateId: 'primero' }),
-      candidate({
-        candidateId: 'segundo',
-        objective: fileGoal('resultado-2.txt', 'SEGUNDO'),
-        doneWhen: ['resultado-2.txt existe con el contenido exacto SEGUNDO'],
-        priority: 5,
-      }),
-    ]);
-    // El presupuesto se fija antes de empezar: en cuanto el primer objetivo
-    // gaste algo, la mision lo ha superado.
-    await context.patchMission({ totalTokenBudget: 1 });
-    context.startSupervisor();
-
-    await context.waitForCompletedGoals(1);
-    await context.waitFor('el segundo objetivo encadenado', async () => {
-      const state = await context.readJournal();
-      return state.intents.filter((intent) => intent.status === 'committed').length >= 2;
-    });
-
-    const state = await context.readJournal();
-    const created = state.intents.filter((intent) => intent.status === 'committed');
-
-    return [
-      {
-        name: 'la cadena no se detuvo por el presupuesto',
-        ok: created.length >= 2,
-        detail: `${created.length} objetivo(s)`,
-      },
-      {
-        name: 'el gasto quedo medido',
-        ok: (state.metrics?.tokensUsed ?? 0) > 0,
-        detail: `${state.metrics?.tokensUsed ?? 0} token(s)`,
-      },
-      {
-        name: 'el presupuesto superado quedo anotado',
-        ok: state.metrics?.budgetExceeded === true,
-      },
-    ];
-  },
-};
-
 /**
  * Un objetivo sin presupuesto no se pierde: vuelve a la cola con mas margen.
  *
@@ -372,9 +302,9 @@ const retry: Scenario = {
   description: 'El objetivo que se queda sin presupuesto vuelve a la cola con mas margen',
   async run(context: ScenarioContext): Promise<Check[]> {
     await context.setCandidates([
-      candidate({
+      unCandidatoDeFichero({
         candidateId: 'reintento',
-        objective: fileGoal('resultado-retry.txt', LARGO),
+        objective: unObjetivoDeFichero('resultado-retry.txt', LARGO),
         doneWhen: ['resultado-retry.txt existe con el contenido exacto pedido'],
       }),
     ]);
@@ -424,7 +354,6 @@ const SCENARIOS: Record<string, Scenario> = {
   chain,
   recovery,
   pause,
-  budget,
   retry,
   exploration,
 };

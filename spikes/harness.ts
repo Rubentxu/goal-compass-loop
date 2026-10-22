@@ -19,8 +19,10 @@ import { FileJournal } from '../src/adapters/journal.js';
 import { ComposedCandidatePort } from '../src/adapters/candidates.js';
 import { SessionExploration } from '../src/adapters/exploration.js';
 import { ChainLock } from '../src/adapters/ownership.js';
+import { loadMissionConfig } from '../src/adapters/mission.js';
 import { writeProposal } from '../src/adapters/proposals.js';
-import { buildCandidatePorts } from '../src/runtime.js';
+import { buildCandidatePorts, ensureMissionState } from '../src/runtime.js';
+import { unaDeclaracion } from '../test/support/harness.js';
 import type { Candidate, Journal, Mission, MissionStatus } from '../src/core/types.js';
 import { Supervisor } from '../src/supervisor.js';
 
@@ -163,60 +165,22 @@ export async function runScenario(
   let adapter: AcpGoalAdapter | undefined;
 
   const writeMissionFile = async (): Promise<void> => {
-    writeFileSync(
-      missionFile,
-      JSON.stringify(
-        {
-          missionId,
-          objective: `Escenario de aceptacion: ${scenario.name}`,
-          workspace,
-          defaultTokenBudget: 120_000,
-          totalTokenBudget: null,
-          maxGoals: null,
-          stallTimeoutMs: 45 * 60_000,
-          explorationEnabled: true,
-          explorationCooldownMs: 30 * 60_000,
-          allowRemoteWrite: false,
-          // El escenario mide el camino del supervisor. Declararlo deja al hook
-          // del plugin aparte, que si no se adelantaria a encadenar.
-          driver: 'supervisor',
-          backlog: candidates,
-        },
-        null,
-        2,
-      ),
-    );
+    unaDeclaracion(workspace, {
+      missionId,
+      objective: `Escenario de aceptacion: ${scenario.name}`,
+      // El escenario mide el camino del supervisor. Declararlo deja al hook
+      // del plugin aparte, que si no se adelantaria a encadenar.
+      driver: 'supervisor',
+      backlog: candidates,
+    });
   };
   await writeMissionFile();
 
-  await journal.saveAtomically({
-    version: 1,
-    missionId,
-    sessionId: undefined,
-    mission: {
-      missionId,
-      objective: `Escenario de aceptacion: ${scenario.name}`,
-      status: 'running',
-      defaultTokenBudget: 120_000,
-      totalTokenBudget: null,
-      maxGoals: null,
-      stallTimeoutMs: 45 * 60_000,
-      explorationEnabled: true,
-      explorationCooldownMs: 30 * 60_000,
-      workspace,
-      backlog: [],
-      allowRemoteWrite: false,
-    },
-    goals: [],
-    intents: [],
-    progress: undefined,
-    explored: [],
-    explorationStreak: 0,
-    lastExplorationAt: undefined,
-    budgetAttempts: [],
-    metrics: { tokensUsed: 0, budgetExceeded: false, budgetExhaustions: 0, goalsCreated: 0 },
-    updatedAt: new Date().toISOString(),
-  });
+  // El estado durable lo prepara el producto, no el arnes. Si el arnes escribe
+  // el estado a mano, el escenario mide un sistema que no existe: en cuanto el
+  // estado gana un campo, el arnes se queda con el estado viejo y el fallo
+  // aparece como un fallo del escenario.
+  await ensureMissionState(loadMissionConfig(missionFile, { workspace }), journal, log);
 
   const deadline = Date.now() + timeoutMs;
   const context: ScenarioContext = {
