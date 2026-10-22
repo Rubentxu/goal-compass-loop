@@ -24,6 +24,7 @@ import {
   aMission,
   anEmptyJournal,
   unCandado,
+  MemoryGoalHistory,
 } from './support/harness.js';
 
 const NOW = 1_700_000_000_000;
@@ -78,6 +79,7 @@ function construir(candidatos: Candidate[]): {
     goalPort: host,
     candidatePort: backlog,
     journalPort: journal,
+    historyPort: new MemoryGoalHistory(),
     chainLock: { acquire: () => unCandado() },
     controlPort: control,
     clock: reloj,

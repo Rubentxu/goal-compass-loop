@@ -28,6 +28,7 @@ import {
   aSnapshot,
   anEmptyJournal,
   unCandado,
+  MemoryGoalHistory,
 } from './support/harness.js';
 
 const NOW = 1_700_000_000_000;
@@ -64,6 +65,7 @@ function build(
     goalPort: host,
     candidatePort: new StaticCandidates(candidates),
     journalPort: journal,
+    historyPort: new MemoryGoalHistory(),
     chainLock: { acquire: () => unCandado() },
     controlPort: new MemoryControl(),
     clock: fixedClock,
@@ -74,28 +76,50 @@ function build(
   });
 }
 
-/** Un journal con un objetivo ya encadenado que se quedo sin presupuesto. */
+/**
+ * Un journal con un objetivo ya encadenado que se quedo sin presupuesto.
+ *
+ * Cada intento es un objetivo que la cadena creo, y el registro guarda uno por
+ * intento: el que se agoto ahora y los que se agotaron antes. El trabajo se
+ * aparta cuando ha tenido demasiados intentos, y para saber cuantos ha tenido
+ * hay que contar los objetivos que se crearon, no solo los que se vio que se
+ * quedaban sin margen.
+ */
 function journalWithExhaustedGoal(
   candidate: Candidate,
   options: { attempts?: BudgetAttempt[]; own?: boolean } = {},
 ): MemoryJournal {
   const journal = new MemoryJournal(anEmptyJournal(aMission({ defaultTokenBudget: 120_000 })));
-  journal.state.budgetAttempts = options.attempts ?? [];
+  const attempts = options.attempts ?? [];
+  journal.state.budgetAttempts = attempts;
 
   if (options.own !== false) {
-    journal.state.intents.push({
-      intentId: 'i1',
+    const intencion = (indice: number, goalId: string, tokenBudget: number) => ({
+      intentId: `i${indice + 1}`,
       candidateId: candidate.candidateId,
       candidateKey: candidateKey(candidate),
       objective: candidate.objective,
       hostObjective: candidate.objective,
       evidenceRefs: [...candidate.evidenceRefs],
       doneWhen: [...candidate.doneWhen],
-      tokenBudget: 120_000,
+      tokenBudget,
       createdAt: new Date(NOW).toISOString(),
-      status: 'committed',
-      goalId: goalIdOf(journal.state.budgetAttempts.length),
+      status: 'committed' as const,
+      goalId,
     });
+
+    // Los intentos anteriores, cada uno con el margen que se le dio.
+    attempts.forEach((attempt, indice) => {
+      journal.state.intents.push(intencion(indice, attempt.goalId, attempt.tokenBudget));
+    });
+    // Y el que se agoto ahora, con el margen que le toco.
+    journal.state.intents.push(
+      intencion(
+        attempts.length,
+        goalIdOf(attempts.length),
+        120_000 * 2 ** attempts.length,
+      ),
+    );
   }
   return journal;
 }
@@ -128,7 +152,13 @@ describe('nucleo · agotar el presupuesto no es un bloqueo', () => {
         ownGoal: true,
         goalCandidate: candidate,
         goalCandidateKey: candidateKey(candidate),
-        budgetAttempts: [anAttempt(1, 120_000)],
+        attempts: [
+          {
+            candidateKey: candidateKey(candidate),
+            goalId: 'tg_agotado_1',
+            tokenBudget: 120_000,
+          },
+        ],
       }),
     );
 
@@ -173,7 +203,11 @@ describe('nucleo · agotar el presupuesto no es un bloqueo', () => {
         ownGoal: true,
         goalCandidate: candidate,
         goalCandidateKey: candidateKey(candidate),
-        budgetAttempts: attempts,
+        attempts: attempts.map((attempt) => ({
+          candidateKey: attempt.candidateKey,
+          goalId: attempt.goalId,
+          tokenBudget: attempt.tokenBudget,
+        })),
       }),
     );
 

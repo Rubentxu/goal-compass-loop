@@ -14,6 +14,17 @@ export type GoalStatus =
   | 'budget_limited'
   | 'usage_limited';
 
+/**
+ * Como quedo un objetivo que la cadena creo.
+ *
+ * Son los estados del host, y uno mas: `interrupted`. Ese no lo devuelve el
+ * host: es el veredicto de la cadena cuando el objetivo se perdio con su
+ * sesion y no hay nadie que sepa como termino. Se registra como lo que es —
+ * sin conclusion— para que no se confunda con un trabajo terminado ni con uno
+ * que fallo por una causa concreta.
+ */
+export type RecordedGoalStatus = GoalStatus | 'interrupted';
+
 /** Estados de Goal que NO autorizan crear el siguiente. */
 export const NON_SUCCESS_GOAL_STATUSES: readonly GoalStatus[] = [
   'paused',
@@ -94,6 +105,35 @@ export interface GoalState {
   executionWait: unknown;
   hasKickoffAttachments: boolean;
   lastVerification?: GoalVerification | null;
+}
+
+/**
+ * Lo que el host sabe de un objetivo que ya no esta en su sesion.
+ *
+ * Un objetivo vive en la sesion que lo creo. Cuando esa sesion se va, el
+ * objetivo se va con ella y el registro de la sesion deja de decir nada: solo
+ * queda lo que el host guardo por su cuenta.
+ */
+export interface GoalWitness {
+  /** Estado que el host le da al objetivo. */
+  status: GoalStatus;
+  /** Tokens que le costaron. */
+  tokensUsed: number;
+  /** Turnos que dio. */
+  turnsUsed: number;
+  /** Por que quedo asi, tal y como lo cuenta el host. */
+  statusReason: string | null;
+  /** Cuando se vio por ultima vez. */
+  updatedAt: number;
+  /**
+   * Hay alguien conduciendo la sesion que lo sostenia.
+   *
+   * Sin esto, un objetivo que nadie cerro se confundiria con uno que sigue
+   * trabajando: el host deja el estado "activo" donde estaba y no lo cambia
+   * nunca, de modo que el objetivo de una sesion que murio parece vivo para
+   * siempre.
+   */
+  ownerAlive: boolean;
 }
 
 /** Proposito de un candidato a Goal. */
@@ -200,7 +240,7 @@ export interface TransitionIntent {
 export interface GoalRecord {
   goalId: string;
   objective: string;
-  status: GoalStatus;
+  status: RecordedGoalStatus;
   statusReason: string | null;
   tokensUsed: number;
   turnsUsed: number;
@@ -237,6 +277,24 @@ export interface BudgetAttempt {
   tokensUsed: number;
   /** Momento en que se constato el agotamiento. */
   endedAt: number;
+}
+
+/**
+ * Un intento sobre un trabajo: un objetivo que la cadena creo para el.
+ *
+ * El conteo de intentos es lo que acota la repeticion. Importa mas como se
+ * conto que el desglose: da igual que el intento se quedara sin presupuesto,
+ * que se perdiera con su sesion o que quedara a medias. Un trabajo que se ha
+ * intentado muchas veces sin completarse se aparca y se deja a un humano,
+ * porque repetir sin limite gastaria presupuesto sin avanzar.
+ */
+export interface WorkAttempt {
+  /** Clave estable del trabajo intentado. */
+  candidateKey: string;
+  /** El objetivo que se creo en este intento. */
+  goalId: string;
+  /** Presupuesto que se le concedio. */
+  tokenBudget: number | undefined;
 }
 
 /**
@@ -327,8 +385,16 @@ export interface Snapshot {
   goalCandidate: Candidate | null;
   /** Clave estable del trabajo que representa el objetivo en curso. */
   goalCandidateKey: string | null;
-  /** Intentos que se quedaron sin presupuesto. */
-  budgetAttempts: BudgetAttempt[];
+  /**
+   * Intentos por trabajo: un objetivo creado por la cadena para ese trabajo.
+   *
+   * Incluye el objetivo que esta en curso. Da igual que el intento se quedara
+   * sin presupuesto o que se perdiera con su sesion: en los dos casos fue un
+   * intento, y un trabajo con demasiados intentos se aparta para un humano.
+   */
+  attempts: WorkAttempt[];
+  /** Trabajos cuyo objetivo sigue vivo: no se pueden volver a encadenar. */
+  inFlightKeys: string[];
   /** Milisegundos desde el ultimo avance observado del Goal en curso. */
   goalProgressSince: number | null;
   /** Marca temporal para decisiones dependientes del tiempo. */

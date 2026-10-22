@@ -20,6 +20,7 @@ import {
   MemoryJournal,
   aCandidate,
   anEmptyJournal,
+  MemoryGoalHistory,
 } from './support/harness.js';
 import { cleanupTempDirs, tempDir } from './support/temp.js';
 
@@ -213,6 +214,7 @@ describe('el supervisor consulta la valla antes de escribir', () => {
       goalPort: host,
       candidatePort: new Candidatos([aCandidate()]),
       journalPort: journal,
+      historyPort: new MemoryGoalHistory(),
       chainLock: { acquire: () => candado },
       controlPort: new MemoryControl(),
       clock: reloj,

@@ -10,6 +10,7 @@ import { basename } from 'node:path';
 import { AcpGoalAdapter } from './adapters/acp-goal.js';
 import { FileControlPort } from './adapters/control.js';
 import { FileJournal } from './adapters/journal.js';
+import { RuntimeGoalHistory } from './adapters/goal-history.js';
 import { loadMissionConfig, sameWorkspace, toMission, type MissionConfig } from './adapters/mission.js';
 import {
   ComposedCandidatePort,
@@ -205,6 +206,7 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
     goalPort: adapter,
     candidatePort: new ComposedCandidatePort(buildCandidatePorts(configPath, config.workspace)),
     journalPort: journal,
+    historyPort: new RuntimeGoalHistory(),
     chainLock: new ChainLock(config.missionId),
     controlPort: new FileControlPort(config.missionId),
     ...(options.exploration === false

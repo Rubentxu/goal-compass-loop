@@ -26,7 +26,11 @@ export interface Rejection {
     | 'ya-completado'
     | 'duplicado-por-clave'
     | 'prerrequisito-pendiente'
-    | 'seccion-cerrada';
+    | 'seccion-cerrada'
+    /** El objetivo de este trabajo sigue vivo: encadenarlo seria duplicarlo. */
+    | 'en-curso'
+    /** Se ha intentado demasiadas veces sin completarse: lo ve un humano. */
+    | 'reintentado-demasiado';
   detail?: string;
 }
 
@@ -194,19 +198,9 @@ export function decide(snapshot: Snapshot): Decision {
   }
 
   if (eligible.length === 0) {
-    const blocked = rejected.filter((r) => r.reason === 'prerrequisito-pendiente');
-    const detail =
-      rejected.length === 0
-        ? 'no hay candidatos registrados'
-        : `${rejected.length} candidato(s) descartado(s)` +
-          (blocked.length > 0
-            ? `, ${blocked.length} por prerrequisitos pendientes (${blocked
-                .map((b) => `${b.candidateId}: ${b.detail ?? '?'}`)
-                .join('; ')})`
-            : '');
     return {
       kind: 'park',
-      reason: `${goal?.status === 'complete' ? 'goal completado y ' : ''}sin trabajo elegible: ${detail}`,
+      reason: `${goal?.status === 'complete' ? 'goal completado y ' : ''}sin trabajo elegible: ${rejectionDetail(rejected)}`,
     };
   }
 
@@ -230,6 +224,11 @@ function esSaltable(status: GoalState['status']): boolean {
  * acabo el espacio. Por eso el trabajo vuelve a la cola con el doble de
  * presupuesto, hasta un maximo de intentos. Cuando se agotan los intentos, la
  * mision sigue viva y espera a que alguien lo revise.
+ *
+ * Los intentos se cuentan por trabajo, no por estado: da igual que el intento
+ * se quedara sin presupuesto o que se perdiera con su sesion. Un intento que
+ * no dejo el trabajo terminado es un intento, y el trabajo se aparta cuando ha
+ * tenido demasiados.
  */
 function decideRetry(snapshot: Snapshot, goal: GoalState): Decision {
   if (!snapshot.ownGoal) {
@@ -250,14 +249,14 @@ function decideRetry(snapshot: Snapshot, goal: GoalState): Decision {
   }
 
   const key = snapshot.goalCandidateKey ?? candidateKey(candidate);
-  const attempts = snapshot.budgetAttempts.filter((attempt) => attempt.candidateKey === key);
+  const attempts = snapshot.attempts.filter((attempt) => attempt.candidateKey === key);
 
   if (attempts.length >= MAX_BUDGET_ATTEMPTS) {
     return {
       kind: 'park',
       reason:
         `el trabajo "${candidate.objective}" se quedo sin presupuesto ${attempts.length} veces ` +
-        `(${attempts.map((attempt) => attempt.tokenBudget).join(', ')} token(s)); ` +
+        `(${attempts.map((attempt) => attempt.tokenBudget ?? '?').join(', ')} token(s)); ` +
         'la mision sigue viva y espera a que alguien lo revise',
     };
   }
@@ -278,6 +277,51 @@ function decideRetry(snapshot: Snapshot, goal: GoalState): Decision {
       `el objetivo ${goal.goalId} se quedo sin presupuesto (${goal.tokensUsed} de ${granted} token(s)); ` +
       `el mismo trabajo se reintenta con ${granted * 2}`,
   };
+}
+
+/** Cuantos intentos ha tenido cada trabajo. */
+function attemptsByKey(snapshot: Snapshot): Map<string, number> {
+  const conteo = new Map<string, number>();
+  for (const attempt of snapshot.attempts) {
+    conteo.set(attempt.candidateKey, (conteo.get(attempt.candidateKey) ?? 0) + 1);
+  }
+  return conteo;
+}
+
+/**
+ * Por que no hay trabajo elegible, en una frase.
+ *
+ * Los descartes que dependen del historial se nombran: un trabajo que se ha
+ * intentado muchas veces y un trabajo cuyo objetivo sigue vivo son cosas que
+ * alguien tiene que mirar. Un "sin trabajo elegible" sin motivo no dice nada.
+ */
+function rejectionDetail(rejected: Rejection[]): string {
+  if (rejected.length === 0) return 'no hay candidatos registrados';
+
+  const partes: string[] = [`${rejected.length} candidato(s) descartado(s)`];
+
+  const demasiados = rejected.filter((r) => r.reason === 'reintentado-demasiado');
+  if (demasiados.length > 0) {
+    partes.push(
+      `${demasiados.length} con demasiados intentos ` +
+        `(${demasiados.map((r) => `${r.candidateId}: ${r.detail ?? '?'}`).join('; ')})`,
+    );
+  }
+
+  const enCurso = rejected.filter((r) => r.reason === 'en-curso');
+  if (enCurso.length > 0) {
+    partes.push(`${enCurso.length} ya en curso (${enCurso.map((r) => r.candidateId).join(', ')})`);
+  }
+
+  const blocked = rejected.filter((r) => r.reason === 'prerrequisito-pendiente');
+  if (blocked.length > 0) {
+    partes.push(
+      `${blocked.length} por prerrequisitos pendientes ` +
+        `(${blocked.map((b) => `${b.candidateId}: ${b.detail ?? '?'}`).join('; ')})`,
+    );
+  }
+
+  return partes.join(', ');
 }
 
 /**
@@ -317,7 +361,8 @@ function describeStall(snapshot: Snapshot): string {
  * Filtra y ordena candidatos de forma determinista.
  *
  * Rechaza: sin evidencia, sin criterio observable, ya completados, duplicados
- * por clave estable y con prerrequisitos no satisfechos.
+ * por clave estable, con un objetivo ya vivo, con demasiados intentos y con
+ * prerrequisitos no satisfechos.
  */
 export function selectCandidates(snapshot: Snapshot): {
   eligible: Candidate[];
@@ -326,6 +371,8 @@ export function selectCandidates(snapshot: Snapshot): {
   const completedIds = new Set(snapshot.completedCandidateIds);
   const completedKeys = new Set(snapshot.completedCandidateKeys);
   const keyById = new Map(snapshot.candidates.map((c) => [c.candidateId, candidateKey(c)]));
+  const enCurso = new Set(snapshot.inFlightKeys);
+  const intentosPorClave = attemptsByKey(snapshot);
 
   const eligible: Candidate[] = [];
   const rejected: Rejection[] = [];
@@ -340,8 +387,31 @@ export function selectCandidates(snapshot: Snapshot): {
       rejected.push({ candidateId: candidate.candidateId, reason: 'ya-completado' });
       continue;
     }
-    if (completedKeys.has(candidateKey(candidate))) {
+    const key = candidateKey(candidate);
+    if (completedKeys.has(key)) {
       rejected.push({ candidateId: candidate.candidateId, reason: 'duplicado-por-clave' });
+      continue;
+    }
+    // Un trabajo cuyo objetivo sigue vivo no se encadena otra vez: el
+    // objetivo vivo haria el trabajo a la vez que el nuevo.
+    if (enCurso.has(key)) {
+      rejected.push({
+        candidateId: candidate.candidateId,
+        reason: 'en-curso',
+        detail: 'el objetivo de este trabajo sigue vivo',
+      });
+      continue;
+    }
+    // Un trabajo que se ha intentado muchas veces sin completarse se deja a
+    // un humano. Repetirlo sin limite gastaria presupuesto sin avanzar, y el
+    // motivo suele estar fuera del alcance de la cadena.
+    const intentos = intentosPorClave.get(key) ?? 0;
+    if (intentos >= MAX_BUDGET_ATTEMPTS) {
+      rejected.push({
+        candidateId: candidate.candidateId,
+        reason: 'reintentado-demasiado',
+        detail: `${intentos} intento(s) sin completarse`,
+      });
       continue;
     }
 

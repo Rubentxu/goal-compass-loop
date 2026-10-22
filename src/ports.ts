@@ -2,7 +2,7 @@
  * Ports: los efectos que el nucleo puro no puede tener.
  * El nucleo no importa nada de aqui; los adaptadores implementan estos tipos.
  */
-import type { Candidate, GoalState, Journal, Mission } from './core/types.js';
+import type { Candidate, GoalState, GoalWitness, Journal, Mission } from './core/types.js';
 
 export interface GoalPort {
   /** Estado actual del Goal de la sesion, o null si no hay. */
@@ -68,6 +68,25 @@ export interface TextSession {
 export interface JournalPort {
   load(): Promise<Journal | null>;
   saveAtomically(journal: Journal): Promise<void>;
+}
+
+/**
+ * El historial de objetivos que sobrevive a la sesion.
+ *
+ * Un objetivo vive en la sesion que lo creo, y se va con ella. El host guarda
+ * el desenlace de cada objetivo por su cuenta, y esa es la unica forma de
+ * saber como termino uno que ya no esta en ninguna sesion.
+ */
+export interface GoalHistoryPort {
+  /**
+   * Que sabe el host de estos objetivos.
+   *
+   * `undefined` significa que el registro no se ha podido leer: no se sabe
+   * nada y no se afirma nada. Un mapa al que le falta el objetivo significa
+   * otra cosa —el host no lo guarda— y esa diferencia decide si lo que no se
+   * sabe se puede dar por perdido o solo se deja en el aire.
+   */
+  outcomes(goalIds: readonly string[]): Map<string, GoalWitness> | undefined;
 }
 
 /**

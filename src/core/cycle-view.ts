@@ -14,7 +14,13 @@
  * Un bloque de texto se copia tal cual a una lista de tareas, y por eso el
  * formato es plano y cada linea dice una sola cosa.
  */
-import { normalize, type Driver, type GoalStatus, type Journal, type MissionStatus } from './types.js';
+import {
+  normalize,
+  type Driver,
+  type Journal,
+  type MissionStatus,
+  type RecordedGoalStatus,
+} from './types.js';
 
 /** Un trabajo pendiente: lo que queda por hacer y de donde sale. */
 export interface CycleWorkItem {
@@ -37,7 +43,7 @@ export interface CycleCurrent {
 export interface CycleDone {
   goalId: string;
   objective: string;
-  status: GoalStatus;
+  status: RecordedGoalStatus;
   tokensUsed: number;
 }
 

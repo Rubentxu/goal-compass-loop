@@ -16,6 +16,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { decide } from './core/decide.js';
+import { verdictOf, type LostGoalVerdict } from './core/lost-goal.js';
 import {
   BUDGET_EXHAUSTED_GOAL_STATUSES,
   TERMINAL_GOAL_STATUSES,
@@ -27,10 +28,12 @@ import {
   type Decision,
   type GoalRecord,
   type GoalState,
+  type GoalWitness,
   type Journal,
   type Mission,
   type Snapshot,
   type TransitionIntent,
+  type WorkAttempt,
 } from './core/types.js';
 import type {
   CandidatePort,
@@ -38,6 +41,7 @@ import type {
   ChainLockPort,
   Clock,
   ExplorationPort,
+  GoalHistoryPort,
   GoalPort,
   JournalPort,
   Logger,
@@ -47,6 +51,13 @@ export interface SupervisorOptions {
   goalPort: GoalPort;
   candidatePort: CandidatePort;
   journalPort: JournalPort;
+  /**
+   * El desenlace de los objetivos que ya no estan en ninguna sesion.
+   *
+   * Sin el, un objetivo que se pierde con su sesion se queda sin registrar y
+   * la cadena vuelve a ofrecer su trabajo como si siguiera pendiente.
+   */
+  historyPort: GoalHistoryPort;
   /** Candado para encadenar: sin el, dos vias podrian crear a la vez. */
   chainLock: ChainLockPort;
   /** Canal de control del usuario, en un fichero aparte del journal. */
@@ -121,6 +132,7 @@ export class Supervisor {
   private readonly goalPort: GoalPort;
   private readonly candidatePort: CandidatePort;
   private readonly journalPort: JournalPort;
+  private readonly historyPort: GoalHistoryPort;
   private readonly chainLock: ChainLockPort;
   private readonly controlPort: SupervisorOptions['controlPort'];
   private readonly explorationPort: ExplorationPort | undefined;
@@ -138,6 +150,7 @@ export class Supervisor {
     this.goalPort = options.goalPort;
     this.candidatePort = options.candidatePort;
     this.journalPort = options.journalPort;
+    this.historyPort = options.historyPort;
     this.chainLock = options.chainLock;
     this.controlPort = options.controlPort;
     this.explorationPort = options.explorationPort;
@@ -239,12 +252,13 @@ export class Supervisor {
     let goal = await this.goalPort.read(sessionId);
     goal = await this.applyControl(journal, goal);
     await this.syncCompletedGoal(journal, goal);
+    const inFlightKeys = await this.recoverLostGoals(journal, goal);
     await this.recordBudgetExhaustion(journal, goal);
     await this.trackProgress(journal, goal);
 
     const discovered = await this.candidatePort.discover(journal.mission, goal);
     const candidates = [...discovered, ...journal.explored];
-    const snapshot = this.buildSnapshot(journal, goal, candidates);
+    const snapshot = this.buildSnapshot(journal, goal, candidates, inFlightKeys);
     await this.updateMetrics(journal, goal);
 
     const decision = decide(snapshot);
@@ -302,6 +316,7 @@ export class Supervisor {
     journal: Journal,
     goal: GoalState | null,
     candidates: Candidate[],
+    inFlightKeys: string[] = [],
   ): Snapshot {
     // Un Goal ya terminado y registrado no se vuelve a sumar: contarlo dos
     // veces consumiria el presupuesto de la mision al doble de velocidad.
@@ -335,7 +350,8 @@ export class Supervisor {
       ownGoal: own,
       goalCandidate: work.candidate,
       goalCandidateKey: work.key,
-      budgetAttempts: journal.budgetAttempts,
+      attempts: this.workAttempts(journal),
+      inFlightKeys,
       goalProgressSince: progress && progress.goalId === goal?.goalId ? progress.since : null,
       now: this.clock.now(),
     };
@@ -447,6 +463,152 @@ export class Supervisor {
   }
 
   /**
+   * Registra el desenlace de los objetivos que se quedaron sin registrar.
+   *
+   * Un objetivo pertenece a la sesion que lo creo. Cuando esa sesion se va, el
+   * objetivo se va con ella, y el registro durable se queda con la intencion de
+   * encadenarlo y nada mas: nadie sabe si termino, y el trabajo vuelve a
+   * ofrecerse como si siguiera pendiente. Eso es lo que hace que la cadena
+   * repita el mismo trabajo indefinidamente, gastando presupuesto sin
+   * avanzar.
+   *
+   * El host guarda el desenlace de cada objetivo por su cuenta, y esa es la
+   * unica testigo que sobrevive a la sesion. Se le pregunta una vez por ciclo —
+   * es una lectura local— y se registra lo que dice: la verdad cuando la hay, y
+   * "interrumpido" cuando no la hay. Nunca se afirma que un trabajo se hizo
+   * sin pruebas de que se hizo.
+   *
+   * Devuelve los trabajos cuyo objetivo sigue vivo: esos no se vuelven a
+   * encadenar, porque el objetivo vivo haria el trabajo a la vez que el nuevo.
+   */
+  private async recoverLostGoals(journal: Journal, current: GoalState | null): Promise<string[]> {
+    const perdidos = journal.intents.filter(
+      (intent) =>
+        intent.status === 'committed' &&
+        intent.goalId !== undefined &&
+        intent.goalId !== current?.goalId &&
+        !journal.goals.some((record) => record.goalId === intent.goalId),
+    );
+    if (perdidos.length === 0) return [];
+
+    const testigos = this.historyPort.outcomes(perdidos.map((intent) => intent.goalId!));
+    if (!testigos) {
+      // Un registro que no se puede leer no dice nada: no se afirma nada y se
+      // vuelve a preguntar en el siguiente ciclo.
+      this.logger.warn('el historial de objetivos no se ha podido leer: la recuperacion espera');
+      return [];
+    }
+
+    const enCurso: string[] = [];
+    let registrados = 0;
+
+    for (const intent of perdidos) {
+      const goalId = intent.goalId!;
+      const witness = testigos.get(goalId);
+      const verdict = verdictOf(witness);
+
+      if (verdict.kind === 'alive') {
+        if (!enCurso.includes(intent.candidateKey)) enCurso.push(intent.candidateKey);
+        continue;
+      }
+
+      journal.goals.push(this.recoveredRecord(intent, verdict, witness));
+      this.recordLostBudgetExhaustion(journal, intent, witness);
+      registrados += 1;
+      this.logger.info(
+        `objetivo recuperado: ${goalId} en ${
+          verdict.kind === 'finished' ? verdict.status : 'interrumpido'
+        } (${verdict.reason})`,
+      );
+    }
+
+    if (registrados > 0) {
+      this.pruneExplored(journal);
+      await this.saveJournal(journal);
+    }
+    return enCurso;
+  }
+
+  /** El registro de un objetivo cuyo desenlace se acaba de recuperar. */
+  private recoveredRecord(
+    intent: TransitionIntent,
+    verdict: LostGoalVerdict,
+    witness: GoalWitness | undefined,
+  ): GoalRecord {
+    const status = verdict.kind === 'finished' ? verdict.status : 'interrupted';
+    const started = this.parseInstant(intent.createdAt);
+    return {
+      goalId: intent.goalId!,
+      objective: intent.objective,
+      status,
+      statusReason: verdict.reason,
+      tokensUsed: witness?.tokensUsed ?? 0,
+      turnsUsed: witness?.turnsUsed ?? 0,
+      startedAt: started,
+      endedAt: witness?.updatedAt ?? started,
+      candidateId: intent.candidateId,
+      candidateKey: intent.candidateKey,
+      evidenceRefs: intent.evidenceRefs ?? [],
+      doneWhen: intent.doneWhen ?? [],
+      receipt: verdict.reason,
+    };
+  }
+
+  /**
+   * Anota el gasto de un objetivo recuperado que se quedo sin presupuesto.
+   *
+   * Los tokens que consumio cuentan como gasto de la mision aunque el
+   * objetivo se haya perdido: se gastaron.
+   */
+  private recordLostBudgetExhaustion(
+    journal: Journal,
+    intent: TransitionIntent,
+    witness: GoalWitness | undefined,
+  ): void {
+    const goalId = intent.goalId!;
+    if (journal.budgetAttempts.some((attempt) => attempt.goalId === goalId)) return;
+    if (!witness) return;
+
+    const status = witness.status;
+    if (status !== 'budget_limited' && status !== 'usage_limited') return;
+
+    const key = intent.candidateKey;
+    const previous = journal.budgetAttempts.filter((attempt) => attempt.candidateKey === key);
+    journal.budgetAttempts.push({
+      candidateKey: key,
+      candidateId: intent.candidateId,
+      goalId,
+      attempt: previous.length + 1,
+      tokenBudget: intent.tokenBudget ?? journal.mission.defaultTokenBudget,
+      tokensUsed: witness.tokensUsed,
+      endedAt: witness.updatedAt,
+    });
+  }
+
+  /**
+   * Los intentos por trabajo: un objetivo creado por la cadena para ese trabajo.
+   *
+   * Cuentan tambien los que se perdieron con su sesion. Un objetivo que se fue
+   * fue un intento, y no contar los perdidos es lo que deja que la cadena
+   * repita el mismo trabajo sin limite.
+   */
+  private workAttempts(journal: Journal): WorkAttempt[] {
+    return journal.intents
+      .filter((intent) => intent.status === 'committed' && intent.goalId !== undefined)
+      .map((intent) => ({
+        candidateKey: intent.candidateKey,
+        goalId: intent.goalId!,
+        tokenBudget: intent.tokenBudget,
+      }));
+  }
+
+  /** Un instante a partir de una fecha en texto, o cero si no se entiende. */
+  private parseInstant(iso: string): number {
+    const value = Date.parse(iso);
+    return Number.isNaN(value) ? 0 : value;
+  }
+
+  /**
    * Anota el intento que se quedo sin presupuesto.
    *
    * Solo cuenta el objetivo que creo la cadena: el objetivo nativo del usuario
@@ -544,10 +706,20 @@ export class Supervisor {
     }
   }
 
-  /** Descarta los candidatos explorados que ya se han resuelto. */
+  /**
+   * Descarta los candidatos explorados que ya se han resuelto.
+   *
+   * Solo se descarta el trabajo hecho. Un objetivo que se quedo a medias o que
+   * se perdio deja su trabajo disponible: eso es justo lo que hay que volver
+   * a ofrecer.
+   */
   private pruneExplored(journal: Journal): void {
     if (journal.explored.length === 0) return;
-    const done = new Set(journal.goals.map((record) => record.candidateKey));
+    const done = new Set(
+      journal.goals
+        .filter((record) => record.status === 'complete')
+        .map((record) => record.candidateKey),
+    );
     journal.explored = journal.explored.filter(
       (candidate) => !done.has(candidateKey(candidate)),
     );

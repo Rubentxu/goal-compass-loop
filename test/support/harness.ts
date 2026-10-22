@@ -13,13 +13,14 @@ import type { ChainLockHandle } from '../../src/ports.js';
 import type {
   Candidate,
   GoalState,
+  GoalWitness,
   Journal,
   Mission,
   MissionStatus,
   Snapshot,
 } from '../../src/core/types.js';
-import { emptyMetrics } from '../../src/core/types.js';
-import type { GoalPort, JournalPort, GoalAdapter } from '../../src/ports.js';
+import { emptyMetrics, candidateKey } from '../../src/core/types.js';
+import type { GoalHistoryPort, GoalPort, JournalPort, GoalAdapter } from '../../src/ports.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tempDir } from './temp.js';
@@ -205,7 +206,8 @@ export function aSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     ownGoal: false,
     goalCandidate: null,
     goalCandidateKey: null,
-    budgetAttempts: [],
+    attempts: [],
+    inFlightKeys: [],
     goalProgressSince: null,
     now: NOW,
     ...overrides,
@@ -379,4 +381,87 @@ export function unCandado(): ChainLockHandle {
   candado.valid = () => true;
   candado.renew = () => {};
   return candado;
+}
+
+/**
+ * Un journal con un objetivo ya encadenado que se quedo sin registrar.
+ *
+ * Es el estado que queda cuando la sesion que lo creo se va: la intencion
+ * esta ahi, el objetivo no, y el registro durable no dice nada de como
+ * termino. El unico que lo sabe es el host, y el host solo lo cuenta cuando
+ * se le pregunta.
+ */
+export function unJournalConObjetivoPerdido(
+  candidate: Candidate,
+  options: { goalId?: string; tokenBudget?: number; mission?: Partial<Mission> } = {},
+): MemoryJournal {
+  const journal = new MemoryJournal(anEmptyJournal(aMission(options.mission)));
+  journal.state.intents.push({
+    intentId: 'i1',
+    candidateId: candidate.candidateId,
+    candidateKey: candidateKey(candidate),
+    objective: candidate.objective,
+    hostObjective: candidate.objective,
+    evidenceRefs: [...candidate.evidenceRefs],
+    doneWhen: [...candidate.doneWhen],
+    tokenBudget: options.tokenBudget ?? 120_000,
+    createdAt: new Date(NOW).toISOString(),
+    status: 'committed',
+    goalId: options.goalId ?? 'tg_perdido',
+  });
+  return journal;
+}
+
+/**
+ * El historial de objetivos del host, en memoria.
+ *
+ * Es la testigo que sobrevive a la sesion: la prueba decide que sabe el host
+ * de cada objetivo y la cadena se vale de ello igual que se vale del registro
+ * de verdad. Un objetivo que no se declara, no se conoce: que es justo lo que
+ * pasa con los que el host ya no guarda.
+ */
+export class MemoryGoalHistory implements GoalHistoryPort {
+  /** Lo que el host sabe de cada objetivo. */
+  readonly known = new Map<string, GoalWitness>();
+  /** Cuando el registro no se puede leer: no se sabe nada y no se afirma nada. */
+  unreadable = false;
+  /** Los objetivos que se han preguntado, en orden. */
+  readonly asked: string[][] = [];
+
+  /** Declara como termino un objetivo. */
+  ended(goalId: string, overrides: Partial<GoalWitness> = {}): void {
+    this.known.set(goalId, {
+      status: 'complete',
+      tokensUsed: 1_000,
+      turnsUsed: 1,
+      statusReason: 'complete(verifier_met)',
+      updatedAt: NOW,
+      ownerAlive: false,
+      ...overrides,
+    });
+  }
+
+  /** Declara que el objetivo sigue vivo en la sesion que lo creo. */
+  alive(goalId: string, overrides: Partial<GoalWitness> = {}): void {
+    this.known.set(goalId, {
+      status: 'active',
+      tokensUsed: 500,
+      turnsUsed: 1,
+      statusReason: null,
+      updatedAt: NOW,
+      ownerAlive: true,
+      ...overrides,
+    });
+  }
+
+  outcomes(goalIds: readonly string[]): Map<string, GoalWitness> | undefined {
+    this.asked.push([...goalIds]);
+    if (this.unreadable) return undefined;
+    const encontrados = new Map<string, GoalWitness>();
+    for (const id of goalIds) {
+      const testigo = this.known.get(id);
+      if (testigo) encontrados.set(id, testigo);
+    }
+    return encontrados;
+  }
 }

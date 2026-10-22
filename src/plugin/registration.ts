@@ -17,15 +17,12 @@
  * comprobar sería inventar.
  */
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { runtimeDbPath } from '../adapters/runtime-state.js';
 import { defaultMarketplaceDir, PLUGIN_NAME } from './install.js';
 
-/** La base de datos del runtime, que es donde vive el registro de plugins. */
-export function runtimeDbPath(): string {
-  return join(homedir(), '.minimax', 'v2', 'sqlite', 'runtime-state.sqlite');
-}
+export { runtimeDbPath };
 
 /** Lo que se sabe del registro del plugin. */
 export interface PluginRegistration {

@@ -643,7 +643,14 @@ async function empujar(missionId: string, values: Options, _imprimir: boolean): 
     ownGoal: false,
     goalCandidate: null,
     goalCandidateKey: null,
-    budgetAttempts: [],
+    attempts: state.intents
+      .filter((intent) => intent.status === 'committed' && intent.goalId !== undefined)
+      .map((intent) => ({
+        candidateKey: intent.candidateKey,
+        goalId: intent.goalId!,
+        tokenBudget: intent.tokenBudget,
+      })),
+    inFlightKeys: [],
     goalProgressSince: state.progress?.since ?? null,
     now: Date.now(),
   });
