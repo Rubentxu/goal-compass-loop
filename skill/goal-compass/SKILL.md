@@ -112,7 +112,7 @@ proponer trabajo. Úsalas cuando te sirvan, no por costumbre:
 
 | Herramienta | Para qué |
 |---|---|
-| `mission_status` | Saber en qué está la Mission y qué trabajo hay disponible. |
+| `mission_status` | Saber en qué está la Mission, qué trabajo hay disponible, quién la conduce y por qué no se está encadenando nada. |
 | `mission_cycle` | Ver el ciclo activo: qué objetivo va, con qué evidencia, qué está hecho, qué queda y cuánto presupuesto se ha gastado. |
 | `mission_declare` | Declarar la misión del proyecto cuando todavía no existe. |
 | `mission_propose` | Proponer el siguiente objetivo cuando no hay trabajo obvious. |
