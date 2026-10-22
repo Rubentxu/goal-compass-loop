@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AcpGoalAdapter } from '../src/adapters/acp-goal.js';
 import { FileControlPort } from '../src/adapters/control.js';
-import { FileJournal } from '../src/adapters/journal.js';
+import { FileJournal, stateRoot } from '../src/adapters/journal.js';
 import { ComposedCandidatePort } from '../src/adapters/candidates.js';
 import { RuntimeGoalHistory } from '../src/adapters/goal-history.js';
 import { SessionExploration } from '../src/adapters/exploration.js';
@@ -334,7 +334,13 @@ export async function runScenario(
     checks.some((check) => check.ok && !check.skipped);
   printReceipt(scenario, checks, failure, workspace, missionId, interrupted);
 
-  if (!options.quiet) rmSync(workspace, { recursive: true, force: true });
+  if (!options.quiet) {
+    rmSync(workspace, { recursive: true, force: true });
+    // La mision del escenario tambien se va. Si se queda, el diagnostico la
+    // cuenta entre las misiones con problemas y ensucia lo que dice de las
+    // que de verdad importan.
+    rmSync(join(stateRoot(), missionId), { recursive: true, force: true });
+  }
   return { ok, checks, interrupted, skipped: skipped.length };
 }
 
