@@ -638,6 +638,11 @@ H5 le da persistencia más allá de una sesión.
   testigo que sobrevive a la sesión— y lo que no se sabe se registra como
   interrumpido, que es lo que es. Los intentos se cuentan por trabajo, así que
   un objetivo perdido también cuenta y el trabajo no se repite sin límite.
+- El `package-lock.json` fijaba unas versiones que el `package.json` no
+  aceptaba, y venía de otro proyecto: `npm ci` fallaba en una copia limpia del
+  repositorio. **Resuelto**: la declaración dice lo que el proyecto usa, el
+  lockfile se resuelve contra ella y el producto instala, compila y pasa sus
+  pruebas desde cero.
 
 **Nota de alcance.** El árbol de decisiones de este proyecto ya está escrito en
 `.goal-compass/` (11 nodos: `grill`, `spec`, `tickets`, `implement`, `review`,

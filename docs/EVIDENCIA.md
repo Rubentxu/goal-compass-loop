@@ -2216,3 +2216,44 @@ la que mira el objetivo vivo falla si su trabajo se encadena otra vez. Las tres
 se comprobaron apagando el arreglo, no leyendo el código: sin la recuperación
 caen tres pruebas, y con el conteo antiguo de intentos cae la del trabajo que
 se aparta.
+
+## 22 · El producto no se podía instalar en limpio
+
+**Síntoma.** `npm ci` fallaba en una copia recién bajada del repositorio. No
+por una dependencia rota: porque el `package.json` y el `package-lock.json`
+contaban historias distintas.
+
+**Por qué.** El lockfile fijaba `vitest 4.1.12`, `typescript 7.0.2` y
+`@types/node 26.6.5` — las versiones con las que el proyecto se desarrolla y se
+verifica — mientras el `package.json` declaraba `^3.0.0`, `^5.9.0` y `^24.0.0`.
+El lockfile además venía de otro proyecto: se llamaba `goalcompassloop` y
+declaraba una dependencia con el SDK de ACP que el código no usa desde que el
+transporte se escribió a mano.
+
+Un lockfile desfasado no rompe el día a día de quien ya tiene `node_modules`.
+Se rompe el día que alguien clona, que entra una máquina nueva o que se quiere
+instalar en limpio para comprobar que el producto está sano. Que el proyecto
+se verificara contra unas versiones que la declaración no aceptaba era, además,
+una forma silenciosa de que nadie supiera contra qué se verificaba.
+
+**Qué se ha cambiado.** La declaración dice lo que el proyecto usa. El lockfile
+se vuelve a resolver contra ella y las versiones no se mueven: no se ha
+cambiado el herramental, se ha escrito lo que ya era verdad.
+
+**Evidencia.**
+
+```text
+ANTES    npm ci
+         npm error code EUSAGE
+         `npm ci` can only install packages when your package.json and package-lock.json
+         are in sync.
+         Invalid: lock file's vitest@4.1.12 does not satisfy vitest@3.2.7
+
+DESPUES  npm ci     ->  found 0 vulnerabilities
+         npm run build   ->  sin errores
+         npm test         ->  37 ficheros, 366 pruebas, todas en verde
+```
+
+La comprobación se hizo en un árbol aparte, instalado desde cero con el
+`package.json` y el `package-lock.json` nuevos: instalar, compilar y pasar las
+pruebas. No basta con que `npm ci` no se queje.
