@@ -2141,3 +2141,78 @@ DESPUES  plugin: registrado y habilitado
 
 La prueba que mira el marketplace local falla sin el arreglo: el diagnóstico
 decía que faltaba un plugin que estaba instalado al lado.
+
+## 21 · El trabajo que se hacía por segunda vez
+
+**Síntoma.** La misión llevaba días encadenando el mismo objetivo. El registro
+durable tenía diez objetivos encadenados y solo tres con desenlace guardado.
+Uno de los que faltaban se había completado: el host lo había verificado y
+dado por bueno, seiscientos cincuenta y seis mil tokens, y nadie lo había
+escrito. El trabajo que ese objetivo había hecho volvía a la cola, como si no
+existiera, y la cadena lo encadenaba otra vez.
+
+**Por qué.** Un objetivo pertenece a la sesión que lo creó, y se va con ella.
+El registro que guarda la cadena es el de la misión, no el de la sesión: ahí
+queda la intención de encadenarlo, y nada más. Nadie sabe si terminó, y lo
+que no se sabe la cadena no lo da por hecho: lo vuelve a ofrecer. Ahí está el
+bucle, y no se acababa nunca.
+
+Había un segundo motivo, y era el que lo escondía. El conteo que aparta un
+trabajo solo contaba los intentos que se habían quedado sin presupuesto *a la
+vista*. Un objetivo que se perdía con su sesión no contaba, así que el trabajo
+podía repetirse sin límite: seis veces, en este caso.
+
+**Qué se ha cambiado.** El host guarda el desenlace de cada objetivo por su
+cuenta, y esa es la única testigo que sobrevive a la sesión. Ahora se le
+pregunta: cuando el registro durable tiene una intención sin desenlace, se le
+pregunta al host y se escribe lo que dice.
+
+- Si terminó, se registra como terminó, y el trabajo queda pagado.
+- Si el objetivo sigue vivo en su sesión, su trabajo no se vuelve a encadenar:
+  el objetivo vivo haría el trabajo a la vez que el nuevo.
+- Y si no hay manera de saberlo, se registra como **interrumpido**, que es lo
+  que es. No se dice que se hizo ni se dice que falló: se dice que no consta
+  que terminara.
+
+El estado «activo» no dice que un objetivo siga trabajando: el host no lo
+cierra cuando la sesión se lleva el objetivo por delante, así que el objetivo
+de una sesión que murió parece vivo para siempre. Por eso se mira también la
+sesión que lo sostenía.
+
+Y el segundo cambio es el que corta el bucle aunque el desenlace se pierda:
+los intentos se cuentan por trabajo. Cada objetivo que la cadena crea es un
+intento, se perdiera o no, y un trabajo con demasiados intentos sin completarse
+se aparta y lo ve una persona, en lugar de seguir gastando.
+
+Lo que no cambia: si el registro del host no se puede leer, no se afirma nada.
+Un registro mudo no puede decir que un trabajo se hizo ni que no se hizo.
+
+**Evidencia.**
+
+```text
+ANTES    intenciones comprometidas: 10   objetivos registrados: 3
+         tg_agath2k9s0mvgmru9x  complete(verifier_met)  656970 token(s)   <- nunca se registro
+
+DESPUES  objetivos registrados: 10
+         tg_agath2k9s0mvgmru9x  complete         656970 token(s)   <- el trabajo, pagado
+         tg_vgfjygyqs0mvk1gest  paused          32179 token(s)   <- el usuario lo pauso
+         tg_sw8aachorkmvid4j04  paused         690928 token(s)
+         tg_bwirib8nammvgk6ks8  interrupted         0 token(s)   <- no consta que terminara
+         tg_w2ybnjaomxmvjsarqp  interrupted         0 token(s)
+         tg_tlk9zk17d5mvjszhz7  interrupted         0 token(s)
+
+         intentos por trabajo:
+           4 intento(s)  que la evidencia y el criterio de cierre lleguen al objetivo
+           6 intento(s)  cerrar los defectos p0 y p1 de la base
+```
+
+Seis intentos sobre el mismo trabajo: a partir del tercero se aparta y lo ve
+una persona. Antes eso no se veía, porque los intentos perdidos no contaban.
+
+**Pruebas.** La que mira el desenlace recuperado falla sin el arreglo: el
+objetivo se quedaba sin registrar y su trabajo se volvía a ofrecer. La que
+mira el trabajo que se aparta falla si los intentos se cuentan como antes. Y
+la que mira el objetivo vivo falla si su trabajo se encadena otra vez. Las tres
+se comprobaron apagando el arreglo, no leyendo el código: sin la recuperación
+caen tres pruebas, y con el conteo antiguo de intentos cae la del trabajo que
+se aparta.

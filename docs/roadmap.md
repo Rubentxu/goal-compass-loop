@@ -630,6 +630,14 @@ H5 le da persistencia más allá de una sesión.
   vez, hasta quedarse sin presupuesto. **Resuelto**: los dos canales aplican
   la misma regla, el estado guarda lo que queda y el diagnóstico cuenta lo que
   se descarta y dice por qué.
+- Un objetivo pertenece a la sesión que lo creó y se va con ella. El registro
+  durable guardaba la intención de encadenarlo y nada más, así que nadie sabía
+  si había terminado: el trabajo volvía a la cola y la cadena lo encadenaba
+  otra vez, mientras el intento perdido no contaba como intento. **Resuelto**:
+  el desenlace se recupera de lo que el host sabe del objetivo —la única
+  testigo que sobrevive a la sesión— y lo que no se sabe se registra como
+  interrumpido, que es lo que es. Los intentos se cuentan por trabajo, así que
+  un objetivo perdido también cuenta y el trabajo no se repite sin límite.
 
 **Nota de alcance.** El árbol de decisiones de este proyecto ya está escrito en
 `.goal-compass/` (11 nodos: `grill`, `spec`, `tickets`, `implement`, `review`,
