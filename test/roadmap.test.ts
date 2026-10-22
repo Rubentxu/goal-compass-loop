@@ -6,10 +6,10 @@
  * mismo una y otra vez.
  */
 import { describe, expect, it, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTempDirs, tempDir } from './support/temp.js';
-import { evidenceSectionClosed, roadmapSection } from '../src/adapters/roadmap.js';
+import { closeRoadmapSection, evidenceSectionClosed, roadmapSection } from '../src/adapters/roadmap.js';
 
 afterEach(cleanupTempDirs);
 
@@ -76,5 +76,58 @@ describe('el roadmap dice que secciones siguen abiertas', () => {
 
     expect(evidenceSectionClosed(workspace, ['docs/roadmap.md'])).toBe(false);
     expect(evidenceSectionClosed(workspace, [])).toBe(false);
+  });
+});
+
+describe('una seccion del roadmap se puede cerrar', () => {
+  it('al cerrarla queda marcada como cerrada, con el motivo', () => {
+    const workspace = workspaceConRoadmap();
+    const path = join(workspace, 'docs', 'roadmap.md');
+
+    const resultado = closeRoadmapSection(path, 'p1', 'ya esta hecho');
+
+    expect(resultado.alreadyClosed).toBe(false);
+    const seccion = roadmapSection(path, 'p1');
+    expect(seccion?.status).toBe('cerrado');
+    expect(seccion?.text).toContain('ya esta hecho');
+  });
+
+  it('al cerrarla deja de ofrecer trabajo', () => {
+    const workspace = workspaceConRoadmap();
+    const path = join(workspace, 'docs', 'roadmap.md');
+
+    expect(evidenceSectionClosed(workspace, ['docs/roadmap.md#p1'])).toBe(false);
+    closeRoadmapSection(path, 'p1', 'ya esta hecho');
+
+    expect(evidenceSectionClosed(workspace, ['docs/roadmap.md#p1'])).toBe(true);
+  });
+
+  it('no reescribe una seccion que ya estaba cerrada', () => {
+    const workspace = workspaceConRoadmap();
+    const path = join(workspace, 'docs', 'roadmap.md');
+    const antes = readFileSync(path, 'utf8');
+
+    const resultado = closeRoadmapSection(path, 'p2', 'otra vez');
+
+    expect(resultado.alreadyClosed).toBe(true);
+    expect(readFileSync(path, 'utf8')).toBe(antes);
+  });
+
+  it('no toca el resto del roadmap', () => {
+    const workspace = workspaceConRoadmap();
+    const path = join(workspace, 'docs', 'roadmap.md');
+
+    closeRoadmapSection(path, 'p1', 'ya esta hecho');
+
+    const texto = readFileSync(path, 'utf8');
+    expect(texto).toContain('## 2 · Algo cerrado');
+    expect(texto).toContain('**Estado:** cerrado (ya esta hecho)');
+  });
+
+  it('un ancla que no existe no se cierra en silencio', () => {
+    const workspace = workspaceConRoadmap();
+    const path = join(workspace, 'docs', 'roadmap.md');
+
+    expect(() => closeRoadmapSection(path, 'p99', 'nada')).toThrow();
   });
 });

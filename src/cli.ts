@@ -35,6 +35,7 @@ import { normalizeJournal, type Candidate, type Journal, type MissionStatus } fr
 import { DEFAULT_NUDGE_COOLDOWN_MS, DEFAULT_NUDGE_STALL_MS, decideNudge } from './core/nudge.js';
 import { classifyPush, sesionTrasEmpuje } from './core/push.js';
 import { pluginRegistration, pluginRegistrationLine } from './plugin/registration.js';
+import { closeRoadmapSection, roadmapSection } from './adapters/roadmap.js';
 
 const logger = {
   info: (message: string) => console.log(`[${new Date().toISOString()}] ${message}`),
@@ -58,6 +59,8 @@ const USAGE = `Goal Compass Loop · supervisor de Goals nativos
   goal-compass pause|resume|stop --mission <id>   ordenes del usuario
   goal-compass probe  --workspace <dir>           comprueba la extension ACP del host
   goal-compass tree   --workspace <dir>           prepara el arbol del proyecto y lo valida
+  goal-compass roadmap --workspace <dir> --section <ancla>
+  goal-compass roadmap --workspace <dir> --close <ancla> --because <motivo>
   goal-compass doctor --workspace <dir>           audita una declaracion de mision
   goal-compass doctor                            audita todas las misiones declaradas
   goal-compass install-skill                       instala la skill goal-compass
@@ -82,6 +85,9 @@ function parse(argv: string[]): { values: Options; positionals: string[] } {
       'total-budget': { type: 'string' },
       'allow-remote-write': { type: 'boolean' },
       init: { type: 'boolean' },
+      close: { type: 'string' },
+      section: { type: 'string' },
+      because: { type: 'string' },
       'poll-ms': { type: 'string' },
       every: { type: 'string' },
       prompt: { type: 'string' },
@@ -462,6 +468,47 @@ async function cmdProbe(values: Options): Promise<void> {
 }
 
 /**
+ * Mira el roadmap del proyecto y cierra lo que ya esta hecho.
+ *
+ * El roadmap es la fuente de verdad de lo que queda: una seccion cerrada deja
+ * de ofrecer trabajo. Cerrarla es escribirlo, no recordar que se hizo.
+ */
+async function cmdRoadmap(values: Options): Promise<void> {
+  const workspace =
+    typeof values.workspace === 'string' ? values.workspace : process.cwd();
+  const path = join(workspace, 'docs', 'roadmap.md');
+
+  if (typeof values.close === 'string' && values.close.trim() !== '') {
+    const anchor = values.close.trim();
+    const motivo =
+      typeof values.because === 'string' && values.because.trim() !== ''
+        ? values.because.trim()
+        : 'sin motivo dado';
+    const resultado = closeRoadmapSection(path, anchor, motivo);
+    logger.info(
+      resultado.alreadyClosed
+        ? `la seccion "${anchor}" ya estaba cerrada: no se toca`
+        : `seccion "${anchor}" cerrada: ${motivo}`,
+    );
+    return;
+  }
+
+  const seccion = typeof values.section === 'string' ? values.section : null;
+  if (seccion) {
+    const leida = roadmapSection(path, seccion);
+    if (!leida) {
+      logger.warn(`el roadmap no tiene ninguna seccion con el ancla "${seccion}"`);
+      return;
+    }
+    logger.info(`${leida.title ?? seccion}: ${leida.status}`);
+    return;
+  }
+
+  logger.info(`roadmap: ${path}`);
+  logger.info('usa --section <ancla> para mirar una seccion y --close <ancla> --because <motivo> para cerrarla');
+}
+
+/**
  * Prepara el arbol de decision de un proyecto y lo cuenta.
  *
  * Deja el directorio de trabajo en su sitio, con su entrada en `.gitignore`, y
@@ -787,6 +834,7 @@ const COMMANDS: Record<string, (values: Options) => Promise<void>> = {
   stop: controlCommand('stopped_by_user'),
   probe: cmdProbe,
   tree: cmdTree,
+  roadmap: cmdRoadmap,
   doctor: cmdDoctor,
   'install-skill': cmdInstallSkill,
   'install-plugin': cmdInstallPlugin,

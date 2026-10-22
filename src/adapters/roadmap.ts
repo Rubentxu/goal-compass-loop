@@ -9,7 +9,7 @@
  * propuesta. No es una heuristica: el roadmap dice `**Estado:** cerrado` y eso
  * es lo que se obedece.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 /** Si una sección del roadmap sigue abierta o ya está cerrada. */
 export type RoadmapStatus = 'abierto' | 'cerrado';
@@ -69,4 +69,70 @@ export function evidenceSectionClosed(workspace: string, evidenceRefs: string[])
     if (section?.status === 'cerrado') return true;
   }
   return false;
+}
+
+/** Lo que pasó al cerrar una sección. */
+export interface CloseResult {
+  /** Si la sección estaba ya cerrada. */
+  alreadyClosed: boolean;
+  /** El texto nuevo de la sección. */
+  section: string;
+}
+
+/**
+ * Cierra una sección del roadmap, dejando por qué.
+ *
+ * Escribe solo el estado: el resto de la sección no se toca, porque es
+ * historia de lo que se decidió y por qué. Si la sección ya estaba cerrada no
+ * se reescribe: se dice y se deja como estaba.
+ *
+ * Un estado cerrado deja de ofrecer trabajo, así que el motivo importa: es lo
+ * que le dice a quien llegue después qué se hizo y por qué ya no hace falta.
+ */
+export function closeRoadmapSection(path: string, anchor: string, reason: string): CloseResult {
+  const section = roadmapSection(path, anchor);
+  if (!section) throw new Error(`el roadmap no tiene ninguna seccion con el ancla "${anchor}"`);
+  if (section.status === 'cerrado') {
+    return { alreadyClosed: true, section: section.text };
+  }
+
+  const estado = `**Estado:** cerrado (${reason})`;
+  const original = readFileSync(path, 'utf8');
+  const marker = `<a id="${anchor}"></a>`;
+  const start = original.indexOf(marker);
+  if (start < 0) throw new Error(`el roadmap no tiene ninguna seccion con el ancla "${anchor}"`);
+
+  const before = original.slice(0, start + marker.length);
+  const rest = original.slice(start + marker.length);
+  const nextAnchor = rest.search(/<a id="[^"]+"><\/a>/);
+  const body = nextAnchor < 0 ? rest : rest.slice(0, nextAnchor);
+  const after = nextAnchor < 0 ? '' : rest.slice(nextAnchor);
+
+  const cerrada = /\*\*Estado:\*\*[^\n]*/.test(body)
+    ? body.replace(/\*\*Estado:\*\*[^\n]*/, estado)
+    : insertEstado(body, estado);
+
+  writeFileSync(path, `${before}${cerrada}${after}`, 'utf8');
+  return { alreadyClosed: false, section: cerrada };
+}
+
+/**
+ * Pone el estado donde se lee: debajo del titulo, antes de que la seccion
+ * se explique.
+ */
+function insertEstado(body: string, estado: string): string {
+  const lines = body.split('\n');
+  const titulo = lines.findIndex((line) => /^#{1,3}\s+/.test(line));
+  if (titulo < 0) return `${estado}\n${body}`;
+  const despues: string[] = [];
+  let inserted = false;
+  for (const line of lines) {
+    despues.push(line);
+    if (!inserted && /^#{1,3}\s+/.test(line)) {
+      despues.push('');
+      despues.push(estado);
+      inserted = true;
+    }
+  }
+  return despues.join('\n');
 }
