@@ -33,7 +33,7 @@ import {
 import { selectCandidates } from './core/decide.js';
 import { normalizeJournal, type Candidate, type Journal, type MissionStatus } from './core/types.js';
 import { DEFAULT_NUDGE_COOLDOWN_MS, DEFAULT_NUDGE_STALL_MS, decideNudge } from './core/nudge.js';
-import { classifyPush, cuentaComoEmpuje } from './core/push.js';
+import { classifyPush, sesionTrasEmpuje } from './core/push.js';
 
 const logger = {
   info: (message: string) => console.log(`[${new Date().toISOString()}] ${message}`),
@@ -595,17 +595,27 @@ async function empujar(missionId: string, values: Options, _imprimir: boolean): 
 
   const salida = `${child.stderr || ''}\n${child.stdout || ''}`;
   const outcome = classifyPush(salida, child.status);
+  const tras = sesionTrasEmpuje(outcome);
 
   // Solo un empujon que entro de verdad enfrria la cadena. Una sesion ocupada no
   // se ha empujado: esta trabajando, y cobrale el enfriamiento dejaria el
   // trabajo de verdad sinparable hasta media hora despues.
-  if (cuentaComoEmpuje(outcome)) {
+  if (tras === 'cobrar-enfriamiento') {
     state.lastNudgeAt = Date.now();
     await new FileJournal(missionId).saveAtomically(state);
   }
 
   if (outcome === 'delivered') return `sesion empujada: ${state.sessionId}`;
   if (outcome === 'session-busy') return 'la sesion esta ocupada: se reintentara en la proxima vuelta';
+  if (tras === 'soltar-sesion') {
+    // La sesion ya no existe. Empujarle es escribir al vacio, y el reloj lo
+    // intentaria otra vez en cada vuelta, para siempre. Se suelta del estado:
+    // la siguiente sesion que abra la mision se engancha sola, y mientras
+    // tanto el reloj no gasta un host en hablar con la nada.
+    state.sessionId = undefined;
+    await new FileJournal(missionId).saveAtomically(state);
+    return 'la sesion ya no existe: se suelta y el reloj deja de empujarla';
+  }
   return `el empujon no cuaja: ${salida.trim() || `codigo ${child.status}`}`;
 }
 
