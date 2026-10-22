@@ -34,6 +34,7 @@ import { selectCandidates } from './core/decide.js';
 import { normalizeJournal, type Candidate, type Journal, type MissionStatus } from './core/types.js';
 import { DEFAULT_NUDGE_COOLDOWN_MS, DEFAULT_NUDGE_STALL_MS, decideNudge } from './core/nudge.js';
 import { classifyPush, sesionTrasEmpuje } from './core/push.js';
+import { pluginRegistration, pluginRegistrationLine } from './plugin/registration.js';
 
 const logger = {
   info: (message: string) => console.log(`[${new Date().toISOString()}] ${message}`),
@@ -131,6 +132,7 @@ async function cmdDoctor(values: Options): Promise<void> {
   }
 
   let conProblemas = 0;
+  const registro = pluginRegistration();
   for (const { missionId, workspace } of workspaces) {
     const path = findMissionFile(workspace);
     if (!path) {
@@ -154,6 +156,34 @@ async function cmdDoctor(values: Options): Promise<void> {
     console.log(
       `${missionId.padEnd(28)} ${workspace}\n` +
         `  candidatos: ${audit.candidates} | usables: ${audit.ready} | descartados: ${audit.discarded} | ${estado}`,
+    );
+
+    // Las cuatro preguntas del primer minuto: ¿puede la cadena trabajar aqui?
+    // La declaracion dice si el trabajo es valido; el estado durable dice si
+    // hay quien conduzca, cuanto presupuesto queda y cual fue el ultimo
+    // objetivo encadenado.
+    console.log(`  plugin: ${pluginRegistrationLine(registro)}`);
+    let journal: Journal | null = null;
+    try {
+      journal = await new FileJournal(missionId).load();
+    } catch {
+      // Un journal ilegible no es una mision rota: es un estado que no se
+      // puede leer. El diagnostico sigue diciendo lo demas.
+      journal = null;
+    }
+    const conductor = journal?.mission.driver ?? 'nadie todavia';
+    const gastado = journal?.goals.reduce((total, goal) => total + goal.tokensUsed, 0) ?? 0;
+    const tope = journal?.mission.totalTokenBudget ?? null;
+    const ultimo = journal?.goals.at(-1);
+    console.log(
+      `  conduce: ${conductor} | presupuesto: ${gastado} de ${tope ?? 'sin tope'} token(s)`,
+    );
+    console.log(
+      `  ultimo objetivo: ${
+        ultimo
+          ? `"${ultimo.objective.slice(0, 60)}" (${ultimo.status}, ${ultimo.goalId})`
+          : 'ninguno'
+      }`,
     );
 
     // Agrupado por tipo: veinte candidatos con el mismo defecto son una
@@ -289,6 +319,16 @@ async function cmdDeclare(values: Options): Promise<void> {
   logger.info(`objetivo: ${config.objective}`);
   logger.info(`conduce: ${config.driver ?? 'plugin'}`);
   logger.info(`estado durable: ${journalPath(config.missionId)}`);
+
+  // Declarar es facil y no depende del plugin; encadenar si. Si el plugin no
+  // esta registrado, la mision existe y no va a pasar nada: hay que decirlo
+  // aqui, con el comando exacto para arreglarlo.
+  const registro = pluginRegistration();
+  if (registro.enabled) {
+    logger.info(`plugin: ${pluginRegistrationLine(registro)}`);
+  } else {
+    logger.warn(`plugin: ${pluginRegistrationLine(registro)}`);
+  }
 
   // Declarar no es solo escribir: es decir si lo escrito sirve. Una
   // declaracion con el campo de la evidencia mal escrito se lee entera y no
