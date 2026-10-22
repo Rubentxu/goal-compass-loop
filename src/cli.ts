@@ -33,6 +33,7 @@ import {
 import { selectCandidates } from './core/decide.js';
 import { normalizeJournal, type Candidate, type Journal, type MissionStatus } from './core/types.js';
 import { DEFAULT_NUDGE_COOLDOWN_MS, DEFAULT_NUDGE_STALL_MS, decideNudge } from './core/nudge.js';
+import { classifyPush, cuentaComoEmpuje } from './core/push.js';
 
 const logger = {
   info: (message: string) => console.log(`[${new Date().toISOString()}] ${message}`),
@@ -581,8 +582,10 @@ async function empujar(missionId: string, values: Options, _imprimir: boolean): 
       state.sessionId,
       '--cwd',
       state.mission.workspace,
+      '--max-steps',
+      '1',
       '--timeout',
-      '10m',
+      '2m',
       '--output-last-message',
       join(stateRoot(), missionId, 'last-nudge.txt'),
       prompt,
@@ -590,13 +593,20 @@ async function empujar(missionId: string, values: Options, _imprimir: boolean): 
     { encoding: 'utf8' },
   );
 
-  state.lastNudgeAt = Date.now();
-  await new FileJournal(missionId).saveAtomically(state);
+  const salida = `${child.stderr || ''}\n${child.stdout || ''}`;
+  const outcome = classifyPush(salida, child.status);
 
-  if (child.status !== 0) {
-    return `el empujon no cuaja: ${(child.stderr || '').trim() || `codigo ${child.status}`}`;
+  // Solo un empujon que entro de verdad enfrria la cadena. Una sesion ocupada no
+  // se ha empujado: esta trabajando, y cobrale el enfriamiento dejaria el
+  // trabajo de verdad sinparable hasta media hora despues.
+  if (cuentaComoEmpuje(outcome)) {
+    state.lastNudgeAt = Date.now();
+    await new FileJournal(missionId).saveAtomically(state);
   }
-  return `sesion empujada: ${state.sessionId}`;
+
+  if (outcome === 'delivered') return `sesion empujada: ${state.sessionId}`;
+  if (outcome === 'session-busy') return 'la sesion esta ocupada: se reintentara en la proxima vuelta';
+  return `el empujon no cuaja: ${salida.trim() || `codigo ${child.status}`}`;
 }
 
 /** Cada cuanto mira por defecto. Diez minutos es cuando ya se nota. */
