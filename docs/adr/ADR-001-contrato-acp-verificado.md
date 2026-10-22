@@ -9,7 +9,7 @@ extensión ACP de Goal a partir del código de `main` de GitHub. Antes de
 implementar el adaptador había que **verificarlo contra la instalación real**,
 porque el roadmap exigía «no fabricar integración ni afirmar éxito» (M0).
 
-## Decision
+## Decisión
 
 Se implementa contra el host real `mcode acp` (MCode **0.6.12**, instalado en
 `~/.minimax-code/releases/0.6.12`) y se documenta el contrato observado.
@@ -111,3 +111,34 @@ notificacion `mcode/session/goal_update` no aparece en `notifications`.
   y su semantica es de observabilidad.
 - **Conectar a la TUI ya abierta:** no hay soporte documentado; se crearia una
   segunda autoridad sobre la misma sesion.
+
+## Qué fixture deja de ser válido
+
+**La forma del aviso `goal_update`.** El kit de v0.2 lo dejó sin decidir:
+`spec/docs/14-protocolo-supervisor.md` lo escribe como
+`notify mcode/session/goal_update { ... }`, con la nota «estructura exacta:
+validar en M0». Ahora está fijada: `{ sessionId, goal }` cuando hay objetivo, y
+`{ sessionId, goal: null, goalId }` cuando se limpia. Un doble de host que
+notificara una carga arbitraria —o un cliente que leyera el aviso sin
+`sessionId` ni `goalId`— deja de ser un fixture válido: el `goal: null` lleva
+el `goalId` a propósito, para que el cliente sepa **qué** objetivo se limpió
+sin necesitar un `get` de más.
+
+**El conjunto de campos de `GoalState`.** El kit enumeraba los estados pero
+nunca los campos. Los reales incluyen `statusReason`, `lastVerification`,
+`executionWait` y `hasKickoffAttachments`. Un doble que devuelva solo
+`{ goalId, status, objective }` ya no cumple el contrato: el supervisor lee
+`statusReason` para distinguir un cierre del host de uno del usuario, y sin él
+no puede.
+
+**Los estados que `goal/patch` acepta.** `goal/patch` acepta `active`,
+`paused`, `blocked`, `complete` y `budget_limited`. `usage_limited` se observa
+en el `GoalState` pero **no** se puede parchear a él. Un fixture que encadene
+parcheando a `usage_limited` es inválido.
+
+Lo que **no** cambia: la lista de estados que el kit ya acertó
+(`active | paused | blocked | complete | budget_limited | usage_limited`) y la
+política de fallar cerrado cuando el host no anuncia la extensión. Este ADR
+verificó el contrato, y casi todo lo que el kit daba por supuesto resultó
+correcto: lo que invalidó fue la forma de la notificación y de los campos, no
+los métodos.

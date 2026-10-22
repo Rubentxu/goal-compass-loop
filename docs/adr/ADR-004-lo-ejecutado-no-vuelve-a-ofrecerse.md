@@ -102,3 +102,24 @@ ledger es opcional y su ausencia no descarta trabajo.
   el menu de trabajo se pueda leer sin tener que cruzar dos sitios.
 - Una propuesta rechazada por estar ya ejecutada se puede volver a proponer
   con más detalle, y entonces sí se registra.
+
+## Qué fixture deja de ser válido
+
+**La identidad del trabajo por su clave estable.** Antes, dos entradas con la
+misma intención pero distinto alcance eran dos trabajos distintos. Ya no: un
+trabajo se identifica por **su intención**, y la clave estable —intención,
+alcance y criterio— pasa a identificar solo **la misma entrada**. Un fixture
+que espere dos trabajos distintos porque sus alcances difieren es inválido;
+se funden en uno y se conserva la entrada del canal curado.
+
+**El fichero de misión sin `executed` como descripción completa.** El ledger
+es opcional y su ausencia **no** invalida el fichero: la cadena sigue
+funcionando como antes. Lo que este ADR invalida es su lectura como «esto
+describe el workspace»: un fichero sin `executed` dice qué hay que hacer y
+calla lo que se hizo, así que la cadena tiene que cruzarlo con su propia
+memoria. Un workspace con trabajo ya pagado y sin esa lista es un fixture
+incompleto, no uno válido.
+
+Lo que **no** cambia: `mission_propose` sigue aceptando una propuesta con más
+detalle sobre trabajo ya ejecutado, y el backlog sigue mandando sobre las
+propuestas cuando describen la misma intención.

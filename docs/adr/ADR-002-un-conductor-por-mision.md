@@ -78,6 +78,25 @@ adivinar.
 - El estado durable necesita un campo más. Es un cambio compatible: un journal
   viejo se lee igual y se considera «sin conductor» hasta que alguien actúe.
 
+## Qué fixture deja de ser válido
+
+**El escenario de «un solo escritor».** El kit de v0.2 lo daba por bueno:
+su ADR-007 pide «mantener un solo writer» y su ADR-001 declara una única
+Skill router «sin sesiones propias, hooks, MCP ni daemon». Ese escenario —un
+único proceso que escribe el journal— era la forma de evitar la carrera, y
+dejó de servir en cuanto el plugin —el camino recomendado— añadió su propio
+hook: ahora hay **dos** escritores por diseño, y el que los separa ya no es el
+fichero sino la decisión.
+
+Lo que queda de ese fixture: escribir el journal de forma atómica sigue siendo
+necesario, pero **no es lo que impide la carrera**. Un fixture que se apoye
+solo en la escritura atómica para impedir dos Goals a la vez es inválido.
+
+**El fichero de misión sin `driver`.** Sigue siendo válido —el mando se
+reparte por arrendamiento y el candado cubre la carrera—, así que no se
+invalida. Lo que este ADR invalida es su lectura como «esto basta»: el
+`driver` pasó a ser la forma de **decir** quién conduce, no un adorno.
+
 ## Relación con el resto
 
 - **ADR-001** (kit v0.2) decía «sin hooks, MCP ni daemon». Quedó sustituido

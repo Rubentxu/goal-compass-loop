@@ -65,6 +65,26 @@ sobre la misma sesión, que es justo lo que el kit descartaba.
   una propuesta que el motor iba a descartar, porque cada uno aplicaba su
   propia idea de qué es trabajo.
 
+## Qué fixture deja de ser válido
+
+**El kit de v0.2 como descripción del producto.** Su ADR-001 declara «una
+única Skill router independiente `goal-compass`; sin sesiones propias, hooks,
+MCP ni daemon». Eso dejó de ser una descripción: hoy hay supervisor, hook y
+servidor de herramientas. El fichero del kit se conserva como documento
+histórico, no como contrato vigente.
+
+**La alternativa que el kit daba por descartada.** Su ADR-007 descarta «MCP o
+HTTP server solo para orquestar el ciclo». Con el servidor de herramientas
+real, esa alternativa deja de estar descartada **en principio** y pasa a estar
+acotada por este ADR: un servidor que **encadena trabajo** es un fixture
+inválido; uno que **gobierna y propone** es el que vale. La frontera no es
+«MCP sí o no»: es quién decide y quién crea.
+
+Lo que **no** cambia: el servidor de herramientas sigue sin escribir en el
+journal, y `mission_propose` sigue dejando una propuesta en vez de crear un
+objetivo. Los tres ficheros —journal, órdenes, propuestas— siguen siendo
+tres.
+
 ## Relación con el resto
 
 - **ADR-002** fija quién conduce la misión y por qué el canal de control y el
