@@ -304,7 +304,8 @@ llega nunca a quien tiene que demostrarlo.
 ## 2 · El estado de la misión dice quién conduce y por qué no se encadenó
 
 **Prioridad:** alta · **Desbloquea:** la regla de la skill y la confianza del
-usuario
+usuario · **Estado:** cerrado (la salida del estado dice el conductor y el
+motivo: `Conduce:` y `Cadena:`)
 
 **El hueco.** La skill dice al agente que consulte el estado de la misión y
 que, si dice quién conduce, no espere al siguiente objetivo. Pero **el estado
@@ -339,6 +340,9 @@ arranca.
 ## 3 · Un diagnóstico que dice si la cadena puede trabajar aquí
 
 **Prioridad:** media-alta · **Desbloquea:** el primer minuto de quien instala
+· **Estado:** cerrado (`goal-compass doctor` y `declare` dicen si el plugin
+está registrado, quién conduce, qué presupuesto queda y cuál fue el último
+objetivo)
 
 **El hueco.** Declarar una misión es fácil; saber si va a funcionar es otra
 cosa. Hoy, si el plugin no está registrado en MCode, la misión se declara
@@ -369,7 +373,9 @@ tampoco lo comprueba. Quien acaba de instalar pasa de «no funciona» a
 
 ## 4 · El proyecto puede partir del árbol sin escribirlo a mano
 
-**Prioridad:** media · **Desbloquea:** la personalización por proyecto
+**Prioridad:** media · **Desbloquea:** la personalización por proyecto ·
+**Estado:** cerrado (`goal-compass tree --init` copia el árbol de la skill al
+proyecto y el proyecto manda desde ahí)
 
 **El hueco.** El árbol propio del proyecto manda sobre el de la skill, y el
 comando que lo prepara solo valida: si el proyecto no tiene nodos, se usa el
@@ -399,7 +405,8 @@ que el árbol quería evitar.
 
 ## 5 · El ejemplo de declaración está al día
 
-**Prioridad:** baja · **Alcance:** `examples/mission.json`
+**Prioridad:** baja · **Alcance:** `examples/mission.json` · **Estado:** cerrado
+(el ejemplo declara el conductor y su evidencia apunta a ficheros de verdad)
 
 **El hueco.** El fichero de ejemplo es lo que la gente copia, y está más
 viejo que el producto: no declara el camino que conduce la misión, que
@@ -418,7 +425,8 @@ secciones que no existen en el documento al que señala.
 
 ## 6 · Las dos decisiones que más cambiaron el producto tienen su ADR
 
-**Prioridad:** media · **Alcance:** `docs/adr/`
+**Prioridad:** media · **Alcance:** `docs/adr/` · **Estado:** cerrado (ADR-005
+del árbol como dato y ADR-006 de la declaración como puerta)
 
 **El hueco.** Las fuentes normativas del proyecto están en `docs/adr/`, y las
 dos decisiones que más han cambiado el contrato del producto —el árbol como

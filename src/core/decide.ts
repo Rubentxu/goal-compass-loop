@@ -25,7 +25,8 @@ export interface Rejection {
     | 'sin-criterio-observable'
     | 'ya-completado'
     | 'duplicado-por-clave'
-    | 'prerrequisito-pendiente';
+    | 'prerrequisito-pendiente'
+    | 'seccion-cerrada';
   detail?: string;
 }
 
@@ -43,7 +44,8 @@ export interface Rejection {
 export type CandidateDefect =
   | 'sin-evidencia'
   | 'sin-criterio-observable'
-  | 'ya-completado';
+  | 'ya-completado'
+  | 'seccion-cerrada';
 
 /**
  * Comprueba si un candidato cumple las condiciones minimas para ser trabajo.
