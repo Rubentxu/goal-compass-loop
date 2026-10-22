@@ -442,6 +442,83 @@ describe('proceso vivo', () => {
     expect(existsSync(keeperSocketPath(sessionId))).toBe(false);
   });
 
+  it('el proceso vivo de un host que ya no esta se retira y se levanta otro', async () => {
+    // Este es el reinicio. El host se cae y vuelve con la misma sesion, y el
+    // proceso vivo del host anterior sigue en pie un instante: su watchdog se
+    // da cuenta de que el dueno no esta y se apaga, pero hasta entonces
+    // **responde**. Si el host nuevo se lo creyera, no levantaria el suyo y en
+    // cuanto el viejo se apagara la sesion se quedaria sin proceso vivo para
+    // el resto de su vida.
+    const sessionId = 'mvs_reinicio';
+    const socketPath = keeperSocketPath(sessionId);
+
+    // Un proceso vivo de otro host: su dueno es otro proceso, no el nuestro.
+    const viejo = spawn(
+      TSX,
+      [
+        KEEPER,
+        '--session',
+        sessionId,
+        '--workspace',
+        workspace,
+        '--socket',
+        socketPath,
+        '--owner',
+        String(process.pid + 1_000_000),
+        '--host',
+        process.execPath,
+        '--host-args',
+        JSON.stringify([HOST_SCRIPT]),
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, XDG_STATE_HOME: stateHome },
+        stdio: 'ignore',
+      },
+    );
+    try {
+      expect(await waitFor(() => existsSync(socketPath))).toBe(true);
+
+      // El host nuevo llega: el proceso vivo que hay no es suyo.
+      await runSessionHook(
+        JSON.stringify({ hook_event_name: 'SessionStart', session_id: sessionId, cwd: workspace }),
+        {
+          logger: quietLogger,
+          keeper: {
+            command: TSX,
+            args: [KEEPER, '--host', process.execPath, '--host-args', JSON.stringify([HOST_SCRIPT])],
+          },
+          ownerPid: process.pid,
+        },
+      );
+
+      // El proceso vivo que responde ahora es del host que ha llegado.
+      const adapter = new KeeperGoalAdapter({
+        sessionId,
+        socketPath,
+        logger: quietLogger,
+        requestTimeoutMs: 5_000,
+      });
+      let dueno: number | undefined;
+      const limite = Date.now() + 10_000;
+      while (Date.now() < limite) {
+        await adapter.start().catch(() => {});
+        const status = await adapter.status().catch(() => null);
+        if (status?.ownerPid === process.pid) {
+          dueno = status.ownerPid;
+          break;
+        }
+        await adapter.close().catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      await adapter.close().catch(() => {});
+
+      expect(dueno).toBe(process.pid);
+    } finally {
+      viejo.kill('SIGKILL');
+    }
+  }, 30_000);
+
   it('el proceso vivo se apaga cuando no puede cargar la sesion', async () => {
     // Si la sesion no se puede abrir, el proceso vivo no puede hacer su
     // trabajo: se apaga y deja que el hook use el camino de reserva.

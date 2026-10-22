@@ -99,6 +99,126 @@ describe('WorkspaceEvidenceScanner · senales de trabajo pendiente', () => {
   });
 });
 
+describe('WorkspaceEvidenceScanner · deuda silenciada', () => {
+  it('encuentra una comprobacion silenciada', async () => {
+    const workspace = workspaceWith({
+      'src/parser.ts': ['export function parse() {', '  // @ts-ignore: el tipo no cuadra', '}'].join('\n'),
+    });
+
+    const evidence = await new WorkspaceEvidenceScanner().scan(workspace);
+
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]?.kind).toBe('debt-suppression');
+    expect(evidence[0]?.location).toBe('src/parser.ts:2');
+    expect(evidence[0]?.summary).toBe('@ts-ignore');
+    expect(evidence[0]?.objective).toContain('src/parser.ts:2');
+    expect(evidence[0]?.doneWhen.length).toBeGreaterThan(0);
+  });
+
+  it('encuentra una regla de lint silenciada', async () => {
+    const workspace = workspaceWith({
+      'src/app.ts': '/* eslint-disable no-console */',
+    });
+
+    const evidence = await new WorkspaceEvidenceScanner().scan(workspace);
+
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]?.kind).toBe('debt-suppression');
+    expect(evidence[0]?.summary).toBe('eslint-disable');
+  });
+
+  it('no confunde una palabra de dato con una supresion', async () => {
+    const workspace = workspaceWith({
+      'src/app.ts': "const mensaje = 'esto es un @ts-ignore de ejemplo';",
+    });
+
+    expect(await new WorkspaceEvidenceScanner().scan(workspace)).toHaveLength(0);
+  });
+});
+
+describe('WorkspaceEvidenceScanner · drift de la documentacion', () => {
+  it('encuentra un enlace a un fichero que no esta', async () => {
+    const workspace = workspaceWith({
+      'docs/roadmap.md': ['# Roadmap', '', 'El detalle esta en [la triaje](triage.md).'].join('\n'),
+    });
+
+    const evidence = await new WorkspaceEvidenceScanner().scan(workspace);
+
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]?.kind).toBe('drift');
+    expect(evidence[0]?.location).toBe('docs/roadmap.md:3');
+    expect(evidence[0]?.summary).toContain('triage.md');
+    expect(evidence[0]?.doneWhen.length).toBeGreaterThan(0);
+  });
+
+  it('encuentra un enlace a un ancla que no existe', async () => {
+    const workspace = workspaceWith({
+      'docs/roadmap.md': ['# Roadmap', '', 'Mira el [detalle](otra.md#seccion).'].join('\n'),
+      'docs/otra.md': ['# Otra cosa', '', 'Nada que ver.'].join('\n'),
+    });
+
+    const evidence = await new WorkspaceEvidenceScanner().scan(workspace);
+
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]?.kind).toBe('drift');
+    expect(evidence[0]?.location).toBe('docs/roadmap.md:3');
+    expect(evidence[0]?.summary).toContain('seccion');
+  });
+
+  it('no inventa drift cuando los enlaces existen', async () => {
+    const workspace = workspaceWith({
+      'docs/roadmap.md': [
+        '# Roadmap',
+        '',
+        'El detalle esta en [la triaje](triage.md) y en [el codigo](../src/app.ts).',
+      ].join('\n'),
+      'docs/triage.md': '# Triaje\n',
+      'src/app.ts': 'export const ok = true;\n',
+    });
+
+    expect(await new WorkspaceEvidenceScanner().scan(workspace)).toHaveLength(0);
+  });
+
+  it('no toma un ejemplo dentro de un bloque de codigo por una referencia', async () => {
+    const workspace = workspaceWith({
+      'docs/roadmap.md': [
+        '# Roadmap',
+        '',
+        'Un enlace se escribe asi:',
+        '',
+        '```text',
+        '[la triaje](triage.md)',
+        '```',
+        '',
+        'Y en linea asi: `[la triaje](triage.md)`.',
+      ].join('\n'),
+    });
+
+    expect(await new WorkspaceEvidenceScanner().scan(workspace)).toHaveLength(0);
+  });
+
+  it('no mira los enlaces a otros sitios de internet', async () => {
+    const workspace = workspaceWith({
+      'docs/roadmap.md': 'Mira el [manual](https://example.com/manual.md) y el [correo](mailto:quien@example.com).',
+    });
+
+    expect(await new WorkspaceEvidenceScanner().scan(workspace)).toHaveLength(0);
+  });
+
+  it('el drift llega a los candidatos con evidencia y criterio de cierre', async () => {
+    const workspace = workspaceWith({
+      'docs/roadmap.md': 'El detalle esta en [la triaje](triage.md).',
+    });
+
+    const candidates = await new WorkspaceDiscovery().discover(aMission({ workspace }), null);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.evidenceRefs).toEqual(['docs/roadmap.md:1']);
+    expect(candidates[0]?.doneWhen.length).toBeGreaterThan(0);
+    expect(candidates[0]?.priority).toBe(0);
+  });
+});
+
 describe('WorkspaceDiscovery · candidatos con evidencia', () => {
   it('traduce senales a candidatos con criterio de cierre y prioridad baja', async () => {
     const workspace = workspaceWith({ 'src/app.ts': '// TODO: corregir el borde' });

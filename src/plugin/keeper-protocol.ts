@@ -30,6 +30,16 @@ export interface KeeperResponse {
   ok: boolean;
   /** Si el proceso ya tiene la sesion cargada en el host. */
   ready?: boolean;
+  /**
+   * El proceso que lanzo al proceso vivo.
+   *
+   * Va en la respuesta del ping porque es la unica forma que tiene quien
+   * llega de saber si el proceso vivo que encuentra es suyo o de un host que
+   * ya no esta: sin esto, un proceso vivo de un host anterior se puede
+   * confundir con el propio y la sesion se queda sin proceso vivo para el
+   * resto de su vida.
+   */
+  ownerPid?: number;
   goal?: GoalState | null;
   cleared?: boolean;
   error?: string;

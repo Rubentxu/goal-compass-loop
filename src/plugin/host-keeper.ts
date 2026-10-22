@@ -317,6 +317,7 @@ export async function runKeeper(options: KeeperOptions): Promise<void> {
         }
         return ready;
       },
+      ownerPid: () => options.ownerPid,
       isStaleCode: () => {
         const firma = codeSignature();
         // Sin firma no hay nada que comparar: mejor seguir sirviendo que
@@ -437,6 +438,8 @@ interface ConnectionContext {
   isStaleCode: () => boolean;
   /** Espera acotada a que la sesion este cargada. */
   waitReady: (ms: number) => Promise<boolean>;
+  /** El proceso que lanzo este proceso vivo, si se sabe. */
+  ownerPid: () => number | undefined;
   shutdown: () => Promise<void>;
 }
 
@@ -496,7 +499,15 @@ async function answer(line: string, socket: Socket, context: ConnectionContext):
 /** Ejecuta la peticion contra el host. */
 async function serve(request: KeeperRequest, context: ConnectionContext): Promise<KeeperResponse> {
   if (request.action === 'ping') {
-    return { ok: true, ready: context.isReady() };
+    // El ping dice tambien de quien es este proceso vivo: quien llega de
+    // reinicio necesita saber si el proceso que encuentra es suyo o el de un
+    // host que ya no esta.
+    const owner = context.ownerPid();
+    return {
+      ok: true,
+      ready: context.isReady(),
+      ...(owner !== undefined ? { ownerPid: owner } : {}),
+    };
   }
 
   const started = Date.now();

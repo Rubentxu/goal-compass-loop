@@ -1,9 +1,10 @@
 /**
  * Descubrimiento de trabajo pendiente a partir del workspace.
  *
- * Lee lo que ya esta en el repositorio (marcadores de pendiente y pruebas
- * omitidas) y lo convierte en candidatos con evidencia observable. No inventa
- * trabajo: si el repositorio no dice nada, no hay candidatos.
+ * Lee lo que ya esta en el repositorio (marcadores de pendiente, pruebas
+ * omitidas, deuda silenciada y referencias rotas) y lo convierte en candidatos
+ * con evidencia observable. No inventa trabajo: si el repositorio no dice nada,
+ * no hay candidatos.
  *
  * El recorrido es determinista (mismo workspace -> mismos candidatos) y esta
  * acotado, para que un repositorio grande no se convierta en una espera
@@ -11,9 +12,10 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { DocumentationScanner } from './drift.js';
 
 /** Tipos de senal que el escaner sabe leer. */
-export type EvidenceKind = 'pending-marker' | 'skipped-test';
+export type EvidenceKind = 'pending-marker' | 'skipped-test' | 'debt-suppression' | 'drift';
 
 /** Una senal concreta localizada en el workspace. */
 export interface Evidence {
@@ -34,6 +36,20 @@ export interface Evidence {
 const PENDING_MARKER = /^\s*(?:\/\/|#|\*|\/\*)?\s*(TODO|FIXME|XXX|HACK)\b[: ]?\s*(.*)$/;
 const SKIPPED_TEST =
   /\b(?:it|test|describe)\.skip\s*\(|\b(?:xit|xtest|xdescribe)\s*\(|\b(?:it|test)\.todo\s*\(/;
+
+/**
+ * Un comprobador silenciado.
+ *
+ * Es deuda por definicion: no es que el codigo tenga un problema, es que el
+ * codigo **no deja que nadie lo vea**. Por eso solo se cuentan las
+ * supresiones de verdad —las que callan al comprobador para siempre— y no los
+ * avisos que el propio codigo explica.
+ *
+ * El prefijo de comentario es lo que distingue una supresion de una palabra
+ * que aparece como dato.
+ */
+const SUPPRESSED_CHECK =
+  /(?:\/\/|\/\*|\*)\s*(@ts-ignore|@ts-nocheck|eslint-disable(?:-next-line|-line)?)\b/;
 
 const CODE_EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.go', '.rs', '.java',
@@ -65,11 +81,17 @@ export class WorkspaceEvidenceScanner {
   private readonly maxFiles: number;
   private readonly maxEvidence: number;
   private readonly maxFileBytes: number;
+  private readonly documents: DocumentationScanner;
 
   constructor(options: ScannerOptions = {}) {
     this.maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
     this.maxEvidence = options.maxEvidence ?? DEFAULT_MAX_EVIDENCE;
     this.maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+    this.documents = new DocumentationScanner({
+      ...(options.maxFiles !== undefined ? { maxFiles: options.maxFiles } : {}),
+      ...(options.maxEvidence !== undefined ? { maxSignals: options.maxEvidence } : {}),
+      ...(options.maxFileBytes !== undefined ? { maxFileBytes: options.maxFileBytes } : {}),
+    });
   }
 
   /** Recorre el workspace y devuelve las señales encontradas, en orden estable. */
@@ -105,6 +127,23 @@ export class WorkspaceEvidenceScanner {
           continue;
         }
 
+        const debt = SUPPRESSED_CHECK.exec(line);
+        if (debt) {
+          const marca = debt[1]!;
+          found.push({
+            kind: 'debt-suppression',
+            location,
+            summary: marca,
+            objective:
+              `Quitar la supresion "${marca}" de ${location} y resolver el problema que tapa`,
+            doneWhen: [
+              `${location} ya no silencia al comprobador`,
+              'El comprobador de tipos y el linter siguen en verde',
+            ],
+          });
+          continue;
+        }
+
         const marker = PENDING_MARKER.exec(line);
         if (marker) {
           const detail = (marker[2] ?? '').trim().slice(0, 160);
@@ -122,6 +161,27 @@ export class WorkspaceEvidenceScanner {
           });
         }
       }
+    }
+
+    // El drift se mira despues: es una senal de la documentacion, y no puede
+    // tapar las del codigo, que son las que el agente puede resolver antes.
+    for (const signal of await this.documents.scan(workspace)) {
+      if (found.length >= this.maxEvidence) break;
+      found.push({
+        kind: 'drift',
+        location: signal.location,
+        summary: signal.summary,
+        objective:
+          signal.missing === 'ancla'
+            ? `Resolver el ancla rota de ${signal.location}: ${signal.target}`
+            : `Resolver la referencia rota de ${signal.location}: ${signal.target}`,
+        doneWhen: [
+          signal.missing === 'ancla'
+            ? `El ancla de ${signal.target} vuelve a existir`
+            : `El fichero al que apunta ${signal.target} existe`,
+          'La documentacion vuelve a describir el repositorio',
+        ],
+      });
     }
 
     return found;

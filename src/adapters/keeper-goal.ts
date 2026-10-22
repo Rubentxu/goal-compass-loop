@@ -32,6 +32,14 @@ interface Pending {
   reject: (error: Error) => void;
 }
 
+/** Lo que el proceso vivo dice de si mismo. */
+export interface KeeperStatus {
+  /** Si ya tiene la sesion cargada en el host. */
+  ready: boolean;
+  /** El proceso que lo lanzo, si lo sabe. */
+  ownerPid?: number;
+}
+
 /** Cliente del proceso vivo. */
 export class KeeperGoalAdapter implements GoalAdapter {
   private readonly options: KeeperGoalOptions;
@@ -137,6 +145,22 @@ export class KeeperGoalAdapter implements GoalAdapter {
   async ping(): Promise<boolean> {
     const response = await this.call({ action: 'ping' });
     return response.ok === true;
+  }
+
+  /**
+   * Pregunta al proceso vivo si esta listo y de quien es.
+   *
+   * De quien es importa al reiniciar: un proceso vivo de un host que ya no
+   * esta va a apagarse solo en cuanto su watchdog se de cuenta, asi que quien
+   * llega tiene que poder distinguirlo del suyo antes de usarlo.
+   */
+  async status(): Promise<KeeperStatus | null> {
+    const response = await this.call({ action: 'ping' });
+    if (!response.ok) return null;
+    return {
+      ready: response.ready === true,
+      ...(typeof response.ownerPid === 'number' ? { ownerPid: response.ownerPid } : {}),
+    };
   }
 
   /**

@@ -13,10 +13,10 @@
  * el terreno para que el hook de continuacion trabaje rapido.
  */
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { KeeperGoalAdapter } from '../adapters/keeper-goal.js';
+import { KeeperGoalAdapter, type KeeperStatus } from '../adapters/keeper-goal.js';
 import { locateMission } from './mission-locator.js';
 import { keeperSocketPath } from './keeper-protocol.js';
 import { parseHookEvent, type HookEvent } from './hook-event.js';
@@ -85,13 +85,36 @@ async function startKeeper(event: HookEvent, log: Logger, options: SessionHookOp
 
   const socketPath = keeperSocketPath(sessionId);
   note(socketPath, `inicio de sesion: ${JSON.stringify(event)}`, log);
-  if (await keeperAlive(socketPath)) {
-    log.info('esta sesion ya tiene un proceso vivo: no se levanta otro');
-    return;
+
+  const ownerPid = options.ownerPid ?? process.ppid;
+
+  // Que proceso vivo hay, y de quien es.
+  //
+  // Aqui esta el reinicio. Cuando el host se cae y vuelve, el proceso vivo del
+  // host anterior puede seguir en pie un instante: su watchdog se da cuenta de
+  // que el dueno no esta y se apaga, pero hasta entonces **responde**. Si aqui
+  // se aceptase cualquier proceso vivo que conteste, el host nuevo creeria que
+  // ya tiene el suyo, no levantaria otro, y en cuanto el viejo se apagara la
+  // sesion se quedaria sin proceso vivo para el resto de su vida: el hook
+  // caeria al camino de reserva —abrir un host y cargar la sesion entera— en
+  // cada turno, que es justo lo que el proceso vivo existe para evitar.
+  //
+  // Por eso se mira de quien es: si es de otro host, se apaga y se levanta uno
+  // propio.
+  const existente = await keeperStatus(socketPath);
+  if (existente) {
+    if (existente.ownerPid === undefined || existente.ownerPid === ownerPid) {
+      log.info('esta sesion ya tiene un proceso vivo: no se levanta otro');
+      return;
+    }
+    log.warn(
+      `el proceso vivo es de otro host (${existente.ownerPid}) y este es ${ownerPid}: ` +
+        'se apaga para levantar uno propio',
+    );
+    await retireKeeper(socketPath, log);
   }
 
   const entry = keeperEntryPoint();
-  const ownerPid = options.ownerPid ?? process.ppid;
   const command = options.keeper?.command ?? process.execPath;
   const baseArgs = options.keeper?.args ?? [entry];
   const child = spawn(
@@ -158,9 +181,13 @@ function note(socketPath: string, message: string, log: Logger): void {
   }
 }
 
-/** Dice si hay un proceso vivo escuchando en el socket. */
-async function keeperAlive(socketPath: string): Promise<boolean> {
-  if (!existsSync(socketPath)) return false;
+/**
+ * Dice que proceso vivo hay escuchando, y de quien es.
+ *
+ * `null` cuando no hay ninguno: o no hay socket, o no contesta.
+ */
+async function keeperStatus(socketPath: string): Promise<KeeperStatus | null> {
+  if (!existsSync(socketPath)) return null;
   const adapter = new KeeperGoalAdapter({
     sessionId: 'sondeo',
     socketPath,
@@ -169,11 +196,47 @@ async function keeperAlive(socketPath: string): Promise<boolean> {
   });
   try {
     await adapter.start();
-    const alive = await adapter.ping();
+    const status = await adapter.status();
     await adapter.close();
-    return alive;
+    return status;
   } catch {
-    return false;
+    await adapter.close().catch(() => {});
+    return null;
+  }
+}
+
+/**
+ * Apaga un proceso vivo que no es de este host.
+ *
+ * Se le pide que se apague y se espera un poco a que suelte el socket: si se
+ * queda escuchando, el proceso vivo nuevo no puede tomar su sitio.
+ */
+async function retireKeeper(socketPath: string, log: Logger): Promise<void> {
+  const adapter = new KeeperGoalAdapter({
+    sessionId: 'retirada',
+    socketPath,
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    requestTimeoutMs: 1_000,
+  });
+  try {
+    await adapter.start();
+    await adapter.shutdown();
+  } catch {
+    // Un proceso vivo que no contesta esta muerto: solo queda el socket.
+  } finally {
+    await adapter.close().catch(() => {});
+  }
+
+  const limite = Date.now() + 1_000;
+  while (existsSync(socketPath) && Date.now() < limite) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  if (existsSync(socketPath)) {
+    try {
+      rmSync(socketPath, { force: true });
+    } catch {
+      log.warn('no se pudo quitar el socket del proceso vivo retirado');
+    }
   }
 }
 
