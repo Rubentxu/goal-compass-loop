@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { AcpGoalAdapter } from './adapters/acp-goal.js';
 import { FileControlPort } from './adapters/control.js';
 import { FileJournal, journalPath, stateRoot } from './adapters/journal.js';
@@ -34,6 +34,7 @@ import { selectCandidates } from './core/decide.js';
 import { normalizeJournal, type Candidate, type Journal, type MissionStatus } from './core/types.js';
 import { DEFAULT_NUDGE_COOLDOWN_MS, DEFAULT_NUDGE_STALL_MS, decideNudge } from './core/nudge.js';
 import { classifyPush, sesionTrasEmpuje } from './core/push.js';
+import { runPush, TOPE_PUSH_MS } from './adapters/push-runner.js';
 import { pluginRegistration, pluginRegistrationLine } from './plugin/registration.js';
 import { closeRoadmapSection, roadmapSection } from './adapters/roadmap.js';
 
@@ -672,7 +673,7 @@ async function empujar(missionId: string, values: Options, _imprimir: boolean): 
   const prompt =
     typeof values.prompt === 'string' && values.prompt ? values.prompt : readNudgePrompt(missionId);
   console.log(`inyectando desde ${nudgePromptPath(missionId)}`);
-  const child = spawnSync(
+  const run = await runPush(
     'mcode',
     [
       'exec',
@@ -688,11 +689,13 @@ async function empujar(missionId: string, values: Options, _imprimir: boolean): 
       join(stateRoot(), missionId, 'last-nudge.txt'),
       prompt,
     ],
-    { encoding: 'utf8' },
+    TOPE_PUSH_MS,
   );
 
-  const salida = `${child.stderr || ''}\n${child.stdout || ''}`;
-  const outcome = classifyPush(salida, child.status);
+  const salida = `${run.stderr}\n${run.stdout}`;
+  // Un empujon que se paso del tiempo no ha llegado a ninguna parte: se
+  // cuenta como fallido, no como entregado.
+  const outcome = run.timedOut ? 'failed' : classifyPush(salida, run.status);
   const tras = sesionTrasEmpuje(outcome);
 
   // Solo un empujon que entro de verdad enfrria la cadena. Una sesion ocupada no
@@ -705,6 +708,10 @@ async function empujar(missionId: string, values: Options, _imprimir: boolean): 
 
   if (outcome === 'delivered') return `sesion empujada: ${state.sessionId}`;
   if (outcome === 'session-busy') return 'la sesion esta ocupada: se reintentara en la proxima vuelta';
+  if (run.timedOut) {
+    return `el empujon se paso del tiempo (${TOPE_PUSH_MS}ms) y se corto: no se sabe si llego`;
+  }
+  if (run.error !== undefined) return run.error;
   if (tras === 'soltar-sesion') {
     // La sesion ya no existe. Empujarle es escribir al vacio, y el reloj lo
     // intentaria otra vez en cada vuelta, para siempre. Se suelta del estado:
@@ -714,7 +721,7 @@ async function empujar(missionId: string, values: Options, _imprimir: boolean): 
     await new FileJournal(missionId).saveAtomically(state);
     return 'la sesion ya no existe: se suelta y el reloj deja de empujarla';
   }
-  return `el empujon no cuaja: ${salida.trim() || `codigo ${child.status}`}`;
+  return `el empujon no cuaja: ${salida.trim() || `codigo ${run.status}`}`;
 }
 
 /** Cada cuanto mira por defecto. Diez minutos es cuando ya se nota. */
