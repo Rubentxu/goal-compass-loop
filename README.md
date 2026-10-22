@@ -133,17 +133,23 @@ terminado, **crea el siguiente en esa misma sesión** y devuelve el turno al
 agente. No hay ningún proceso de fondo: el cierre de turno es el latido de la
 misión.
 
-Además, el plugin entrega seis herramientas para que el agente pueda mirar
+Además, el plugin entrega siete herramientas para que el agente pueda mirar
 la misión y gobernarla sin salir de la conversación:
 
 | Herramienta | Qué hace |
 |---|---|
 | `mission_status` | En qué está la misión, cuántos objetivos ha encadenado y qué trabajo hay disponible |
+| `mission_cycle` | La vista del ciclo activo en texto: objetivo, objetivo en curso con su evidencia, hechos y pendientes, presupuesto gastado y qué camino conduce la misión |
 | `mission_declare` | Declara la misión del proyecto cuando todavía no existe; si ya existe, no la toca |
 | `mission_propose` | Propone el siguiente objetivo; la evidencia tiene que señalar a un fichero que exista y hace falta decir cómo se sabrá que está hecho |
 | `mission_pause` | Pausa la cadena y el objetivo en curso |
 | `mission_resume` | Reanuda una misión pausada o dormida |
 | `mission_stop` | Termina la cadena |
+
+La vista del ciclo también se puede abrir como recurso (`goal-compass://ciclo`),
+con el mismo texto. Existe porque el progreso tiene que verse sin que nadie lo
+pida: el agente la refleja en su lista de tareas y así la cadena deja de ser
+un fichero JSON que hay que ir a leer a mano.
 
 La propuesta es el camino para cuando no hay trabajo marcado: el agente
 investiga, propone con su evidencia, y el cierre de turno siguiente lo

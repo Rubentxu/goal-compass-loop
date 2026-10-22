@@ -13,7 +13,7 @@ import { writeFileSync, existsSync, readFileSync } from 'node:fs';
 
 
 import { join } from 'node:path';
-import { buildMissionTools, handleMessage, resolveWorkspaceDir } from '../src/plugin/mcp-server.js';
+import { buildMissionResources, buildMissionTools, handleMessage, resolveWorkspaceDir } from '../src/plugin/mcp-server.js';
 import { findMissionFileUpwards, locateMission } from '../src/plugin/mission-locator.js';
 import { proposalsPath, readProposals, writeProposal } from '../src/adapters/proposals.js';
 import type { Logger } from '../src/ports.js';
@@ -83,15 +83,17 @@ describe('servidor de herramientas de la mision', () => {
     const init = (await handleMessage(
       { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } },
       tools,
-    )) as { protocolVersion: string; capabilities: { tools: unknown } };
+    )) as { protocolVersion: string; capabilities: { tools: unknown; resources: unknown } };
     expect(init.protocolVersion).toBe('2024-11-05');
     expect(init.capabilities.tools).toBeDefined();
+    expect(init.capabilities.resources).toBeDefined();
 
     const list = (await handleMessage(
       { jsonrpc: '2.0', id: 2, method: 'tools/list' },
       tools,
     )) as { tools: { name: string }[] };
     expect(list.tools.map((tool) => tool.name).sort()).toEqual([
+      'mission_cycle',
       'mission_declare',
       'mission_pause',
       'mission_propose',
@@ -158,6 +160,79 @@ describe('servidor de herramientas de la mision', () => {
     const text = await callTool(tools, 'mission_status');
     expect(text).toContain('prueba-mcp');
     expect(text).toContain('Revisar las notas del repositorio');
+  });
+
+  it('la vista del ciclo se puede pedir como herramienta', async () => {
+    const tools = buildMissionTools({ cwd: workspace, logger: quietLogger });
+
+    const text = await callTool(tools, 'mission_cycle');
+
+    expect(text).toContain('Ciclo activo: prueba-mcp');
+    expect(text).toContain('mision: Comprobar las herramientas de la mision');
+    expect(text).toContain('Revisar las notas del repositorio');
+  });
+
+  it('la vista del ciclo se puede abrir como recurso', async () => {
+    const tools = buildMissionTools({ cwd: workspace, logger: quietLogger });
+    const resources = buildMissionResources({ cwd: workspace, logger: quietLogger });
+
+    const listado = (await handleMessage(
+      { jsonrpc: '2.0', id: 1, method: 'resources/list' },
+      tools,
+      resources,
+    )) as { resources: { uri: string; mimeType: string }[] };
+    expect(listado.resources.map((resource) => resource.uri)).toContain('goal-compass://ciclo');
+    expect(listado.resources[0]?.mimeType).toBe('text/plain');
+
+    const leido = (await handleMessage(
+      {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'resources/read',
+        params: { uri: 'goal-compass://ciclo' },
+      },
+      tools,
+      resources,
+    )) as { contents: { uri: string; text: string }[] };
+    expect(leido.contents[0]?.text).toContain('Ciclo activo: prueba-mcp');
+  });
+
+  it('el recurso dice que no hay mision cuando el workspace no declara ninguna', async () => {
+    const vacio = tempDir('gcl-mcp-recurso-');
+    const tools = buildMissionTools({ cwd: vacio, logger: quietLogger });
+    const resources = buildMissionResources({ cwd: vacio, logger: quietLogger });
+
+    const leido = (await handleMessage(
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'resources/read',
+        params: { uri: 'goal-compass://ciclo' },
+      },
+      tools,
+      resources,
+    )) as { contents: { text: string }[] };
+
+    expect(leido.contents[0]?.text).toContain('No hay ninguna misión declarada');
+  });
+
+  it('no inventa un recurso que no existe', async () => {
+    const tools = buildMissionTools({ cwd: workspace, logger: quietLogger });
+    const resources = buildMissionResources({ cwd: workspace, logger: quietLogger });
+
+    const leido = (await handleMessage(
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'resources/read',
+        params: { uri: 'goal-compass://inventado' },
+      },
+      tools,
+      resources,
+    )) as { contents: { text: string }[]; isError?: boolean };
+
+    expect(leido.isError).toBe(true);
+    expect(leido.contents[0]?.text).toContain('No existe el recurso');
   });
 
   it('registra una propuesta con evidencia real', async () => {

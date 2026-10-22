@@ -174,15 +174,18 @@ describe('hook de continuacion', () => {
     expect(objetivoDelHost()).toContain('no autoriza publicar');
   });
 
-  it('el objetivo lleva el contexto de la mision', async () => {
+  it('el objetivo lleva el ciclo de la mision', async () => {
     await runAutoContinue(JSON.stringify({ session_id: 'mvs_fake', cwd: workspace }), {
       host: HOST,
       logger: quietLogger,
     });
     const objetivo = objetivoDelHost();
-    expect(objetivo).toContain('Contexto de la mision');
+    // La vista del ciclo viaja dentro del objetivo: es lo unico que el host
+    // lleva al agente cuando encadena, asi que si no viaja aqui, no viaja.
+    expect(objetivo).toContain('Ciclo activo');
     expect(objetivo).toContain('presupuesto');
-    expect(objetivo).toContain('trabajo declarado pendiente');
+    expect(objetivo).toContain('Pendiente:');
+    expect(objetivo).toContain('Revisar el fichero de notas del repositorio');
   });
 
   it('el objetivo pide dejar el trabajo siguiente', async () => {

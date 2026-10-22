@@ -460,7 +460,7 @@ y el razonamiento nuevo vive en el cuerpo de la documentación.
 
 ## 7 · El ciclo activo, a la vista
 
-**Prioridad:** media-alta · **Desbloquea:** que el usuario vea la cadena
+**Prioridad:** media-alta · **Estado:** hecha y medida · **Desbloquea:** que el usuario vea la cadena
 
 **El hueco.** La cadena trabaja y no se ve. El estado durable es un JSON en
 `~/.local/state/goal-compass/`, el hook escribe sus avisos en la salida de
@@ -526,6 +526,30 @@ el usuario abre en el navegador, con el estado del ciclo en vivo.
 
 **Alcance.** `src/plugin/mcp-server.ts`, `src/plugin/auto-continue.ts`,
 `skill/goal-compass/SKILL.md`.
+
+**Lo que se hizo.**
+
+- `src/core/cycle-view.ts` — la vista es un módulo puro: arma los datos
+  (`cycleViewOf`) y los pinta (`renderCycleView`). Vive en el dominio y no en
+  el plugin porque hay dos consumidores con que coincidir: el servidor de
+  herramientas y el objetivo encadenado. Si cada uno pintara su propia
+  versión, el agente vería dos verdades.
+- La herramienta `mission_cycle` devuelve la vista bajo demanda, y el
+  recurso `goal-compass://ciclo` devuelve el mismo texto para abrirlo sin
+  actuar. El servidor anuncia `resources` en `initialize` y atiende
+  `resources/list` y `resources/read`.
+- El objetivo encadenado lleva la vista dentro (`auto-continue.ts`), porque
+  el objetivo es lo único que el host entrega al agente: si la vista no
+  viaja ahí, no llega. Las listas se acotan a tres elementos y se dice
+  cuántos se han dejado fuera, porque el objetivo tiene un tope de
+  longitud en el host.
+- `skill/goal-compass/SKILL.md` — el agente refleja la vista en su lista de
+  tareas, que es la superficie donde el progreso se ve sin que nadie lo pida.
+- La vista no miente: no ofrece como pendiente lo que ya se pagó ni lo que
+  está en curso, y avisa cuando el presupuesto se ha superado.
+
+**Evidencia.** `test/cycle-view.test.ts` (11 pruebas) y `test/mcp-server.test.ts`
+(herramienta, recurso y recurso inexistente).
 
 ---
 

@@ -113,6 +113,7 @@ proponer trabajo. Úsalas cuando te sirvan, no por costumbre:
 | Herramienta | Para qué |
 |---|---|
 | `mission_status` | Saber en qué está la Mission y qué trabajo hay disponible. |
+| `mission_cycle` | Ver el ciclo activo: qué objetivo va, con qué evidencia, qué está hecho, qué queda y cuánto presupuesto se ha gastado. |
 | `mission_declare` | Declarar la misión del proyecto cuando todavía no existe. |
 | `mission_propose` | Proponer el siguiente objetivo cuando no hay trabajo obvious. |
 | `mission_pause` / `mission_resume` / `mission_stop` | Mandar una orden sobre la cadena. |
@@ -120,6 +121,18 @@ proponer trabajo. Úsalas cuando te sirvan, no por costumbre:
 `mission_propose` exige que la evidencia señale a un fichero que exista de
 verdad: una propuesta sobre un fichero inexistente se descarta. No inventes
 trabajo para llenar la cola.
+
+### El ciclo, a la vista
+
+Al empezar a trabajar en una Mission —y al retomar una que ya estaba
+activa— pide `mission_cycle` y **refleja lo que devuelve en tu lista de
+tareas**: el objetivo en curso como la tarea en curso, con su evidencia, y el
+trabajo pendiente como lo que queda. La lista de tareas es la única superficie
+del host donde el progreso se ve sin que nadie lo pida, así que una lista que
+no refleja el ciclo deja la cadena invisible otra vez.
+
+La vista también viene dentro del objetivo que encadena la cadena, así que
+tampoco hace falta pedirla para saber por dónde va: llega escrita.
 
 ## Anclas
 
