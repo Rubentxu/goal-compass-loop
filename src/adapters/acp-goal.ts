@@ -172,6 +172,26 @@ export class AcpGoalAdapter implements GoalAdapter {
   }
 
   /**
+   * Inyecta un prompt en la sesion y no espera a la respuesta.
+   *
+   * Es lo que necesita el empujon de fuera: el mensaje entra en la sesion,
+   * que es la que tiene el usuario delante en su terminal, y quien conteste es
+   * el agente que ya esta ahi. No se captura el texto ni se espera: el turno
+   * es del host.
+   */
+  async prompt(text: string): Promise<void> {
+    await this.ensureHost();
+    await this.requireTransport().request(
+      'session/prompt',
+      {
+        sessionId: this.sessionId(),
+        prompt: [{ type: 'text', text }],
+      },
+      ASK_TIMEOUT_MS,
+    );
+  }
+
+  /**
    * Hace una pregunta al agente de la sesion y devuelve su respuesta en texto.
    * Solo se usa con la sesion quieta: si hay un Goal en marcha, sus mensajes
    * se mezclarian con la respuesta.

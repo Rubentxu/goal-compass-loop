@@ -568,6 +568,20 @@ async function serveOnHost(
         return { ok: false, error: (err as Error).message };
       }
     }
+    case 'prompt': {
+      // Inyectar el texto en la sesion: el mensaje entra por donde entra
+      // cualquier otro, asi que el usuario lo ve en su terminal.
+      const text = request.text ?? '';
+      if (text.trim() === '') {
+        return { ok: false, error: 'falta el texto del empujon' };
+      }
+      try {
+        await adapter.prompt(text);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    }
     case 'create': {
       const created = await adapter.create(
         sessionId,

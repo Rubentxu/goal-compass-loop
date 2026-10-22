@@ -16,13 +16,23 @@ import { stateRoot } from '../adapters/journal.js';
 import type { GoalState } from '../core/types.js';
 
 /** Lo que se puede pedir al proceso vivo. */
-export type KeeperAction = 'ping' | 'create' | 'read' | 'pause' | 'resume' | 'clear' | 'close';
+export type KeeperAction =
+  | 'ping'
+  | 'create'
+  | 'read'
+  | 'pause'
+  | 'resume'
+  | 'clear'
+  | 'close'
+  | 'prompt';
 
 /** Peticion del cliente al proceso vivo. */
 export interface KeeperRequest {
   action: KeeperAction;
   objective?: string;
   tokenBudget?: number;
+  /** El texto a inyectar en la sesion, cuando la accion es `prompt`. */
+  text?: string;
 }
 
 /** Respuesta del proceso vivo al cliente. */
@@ -45,7 +55,16 @@ export interface KeeperResponse {
   error?: string;
 }
 
-const ACTIONS: readonly string[] = ['ping', 'create', 'read', 'pause', 'resume', 'clear', 'close'];
+const ACTIONS: readonly string[] = [
+  'ping',
+  'create',
+  'read',
+  'pause',
+  'resume',
+  'clear',
+  'close',
+  'prompt',
+];
 
 /** Ruta del socket que sirve una sesion. */
 export function keeperSocketPath(sessionId: string): string {
@@ -69,6 +88,7 @@ export function parseKeeperRequest(line: string): KeeperRequest | null {
 
   const request: KeeperRequest = { action: action as KeeperAction };
   if (typeof candidate.objective === 'string') request.objective = candidate.objective;
+  if (typeof candidate.text === 'string') request.text = candidate.text;
   if (typeof candidate.tokenBudget === 'number' && Number.isFinite(candidate.tokenBudget)) {
     request.tokenBudget = candidate.tokenBudget;
   }
