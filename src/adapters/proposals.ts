@@ -17,8 +17,8 @@ import { existsSync } from 'node:fs';
 import { candidateKey, type Candidate } from '../core/types.js';
 import { candidateDefect, type CandidateDefect } from '../core/decide.js';
 import type { CandidatePort } from '../ports.js';
-import { isCompleted, workspaceCompletedObjectives, type CompletedObjectives } from './ledger.js';
-import { evidenceSectionClosed } from './roadmap.js';
+import { workspaceCompletedObjectives, type CompletedObjectives } from './ledger.js';
+import { motivoParaDejarDeOfrecer } from './pendiente.js';
 import { stateRoot } from './journal.js';
 
 /** Propuesta pendiente de encadenar. */
@@ -105,13 +105,11 @@ export function reviewProposals(
   completed: CompletedObjectives = workspaceCompletedObjectives(workspace),
 ): ProposalVerdict[] {
   return readProposals(missionId).map((proposal) => {
-    if (isCompleted(completed, proposal.objective)) {
-      return { proposal, defect: 'ya-completado' as const };
-    }
-    // Una propuesta que apunta a una seccion cerrada del roadmap ya no es
-    // trabajo futuro: es trabajo que ya se hizo.
-    if (evidenceSectionClosed(workspace, proposal.evidenceRefs)) {
-      return { proposal, defect: 'seccion-cerrada' as const };
+    // Lo que ya se ejecuto, o lo que el proyecto ya cerro, no vuelve a
+    // ofrecerse: es la misma regla que sigue el backlog declarado.
+    const motivo = motivoParaDejarDeOfrecer(proposal, { workspace, completed });
+    if (motivo) {
+      return { proposal, defect: motivo };
     }
     if (!evidenceExists(workspace, proposal.evidenceRefs)) {
       return { proposal, defect: 'sin-evidencia' as const };

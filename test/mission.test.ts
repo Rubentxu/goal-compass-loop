@@ -25,6 +25,7 @@ import {
 } from '../src/adapters/mission.js';
 import { FileJournal } from '../src/adapters/journal.js';
 import { openMission } from '../src/runtime.js';
+import { aCandidate, MemoryGoalAdapter, unWorkspaceConRoadmap, unaDeclaracion } from './support/harness.js';
 import type { Journal } from '../src/core/types.js';
 import type { Logger } from '../src/ports.js';
 
@@ -137,8 +138,48 @@ describe('declarar una mision', () => {
   });
 });
 
-describe('el estado que pertenece a otro proyecto', () => {
-  it('una mision con el mismo identificador en otro proyecto no conduce', async () => {
+describe('el backlog que la mision guarda', () => {
+  it('no guarda el trabajo que el proyecto ya cerro en su roadmap', async () => {
+    const workspace = unWorkspaceConRoadmap();
+    const previous = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = tempDir('gcl-mision-backlog-');
+    try {
+      const configPath = unaDeclaracion(workspace, {
+        backlog: [
+          aCandidate({
+            candidateId: 'pagado',
+            objective: 'Trabajo que el proyecto ya cerro',
+            evidenceRefs: ['docs/roadmap.md#cerrado'],
+          }),
+          aCandidate({
+            candidateId: 'pendiente',
+            objective: 'Trabajo que sigue en pie',
+            evidenceRefs: ['docs/roadmap.md#abierto'],
+          }),
+        ],
+      });
+      const config = loadMissionConfig(configPath, { workspace });
+
+      const runtime = await openMission({
+        config,
+        configPath,
+        logger: quietLogger,
+        driver: 'plugin',
+        adapter: new MemoryGoalAdapter(),
+      });
+
+      // El estado guarda lo que queda, no la historia: lo que el proyecto ya
+      // dio por hecho no puede volver a ofrecerse como si fuera futuro.
+      const guardado = await new FileJournal(config.missionId).load();
+      expect(guardado?.mission.backlog.map((c) => c.candidateId)).toEqual(['pendiente']);
+    } finally {
+      if (previous === undefined) delete process.env.XDG_STATE_HOME;
+      else process.env.XDG_STATE_HOME = previous;
+    }
+  });
+});
+
+describe('el estado que pertenece a otro proyecto', () => {  it('una mision con el mismo identificador en otro proyecto no conduce', async () => {
     const root = tempDir('gcl-compartido-');
     const otro = tempDir('gcl-compartido-');
     const previous = process.env.XDG_STATE_HOME;

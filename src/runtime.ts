@@ -238,7 +238,16 @@ export async function openMission(options: MissionRuntimeOptions): Promise<Missi
 
   // El fichero de mision manda sobre la intencion (backlog, workspace,
   // presupuestos); el journal conserva el estado de ejecucion.
-  state.mission.backlog = config.backlog;
+  //
+  // El backlog que se guarda es el que queda. El trabajo que el proyecto ya dio
+  // por hecho no se guarda como si fuera futuro: guardarlo haria que el
+  // journal, el menu de trabajo y el objetivo que se encadena dijeran que hay
+  // trabajo donde ya no lo hay. Lo decide el mismo puerto que consulta el
+  // selector, para que las dos vistas no puedan divergir.
+  state.mission.backlog = await new MissionConfigCandidatePort(configPath).discover(
+    state.mission,
+    null,
+  );
   state.mission.workspace = config.workspace;
   state.mission.defaultTokenBudget = config.defaultTokenBudget;
   state.mission.totalTokenBudget = config.totalTokenBudget;

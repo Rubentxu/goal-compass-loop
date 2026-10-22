@@ -16,11 +16,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { candidateDefect } from '../core/decide.js';
 import { loadMissionConfig, type MissionConfig } from './mission.js';
+import { evidenceSectionClosed } from './roadmap.js';
 
 /** Lo que le pasa a una declaración. */
 export type AuditKind =
   | 'sin-evidencia'
   | 'sin-criterio-observable'
+  | 'seccion-cerrada'
   | 'campo-desconocido'
   | 'referencia-rota'
   | 'ancla-rota'
@@ -161,6 +163,16 @@ export function auditDeclaration(
           detail: 'el candidato se descarta: no tiene criterio de cierre observable',
           hint: 'su campo doneWhen tiene que traer al menos una condicion',
         });
+      } else if (evidenceSectionClosed(workspace, parsed.evidenceRefs)) {
+        // El proyecto ya cerro la parte de trabajo que respalda a este
+        // candidato: el selector no lo va a ofrecer, y decirlo aqui evita que
+        // el backlog parezca mas grande de lo que es.
+        problems.push({
+          kind: 'seccion-cerrada',
+          candidateId,
+          detail: 'el candidato se descarta: la seccion del roadmap que lo respalda esta cerrada',
+          hint: 'ese trabajo ya esta hecho: quitalo del backlog o apunta a otra evidencia',
+        });
       }
     }
 
@@ -176,8 +188,11 @@ export function auditDeclaration(
   const invertida = priorityInverted(config);
   if (invertida) problems.push(invertida);
 
-  const descartados = problems.filter((p) =>
-    p.kind === 'sin-evidencia' || p.kind === 'sin-criterio-observable',
+  const descartados = problems.filter(
+    (p) =>
+      p.kind === 'sin-evidencia' ||
+      p.kind === 'sin-criterio-observable' ||
+      p.kind === 'seccion-cerrada',
   ).length;
 
   return {

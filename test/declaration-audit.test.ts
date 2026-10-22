@@ -89,6 +89,39 @@ describe('auditoria de una declaracion', () => {
     expect(audit.problems.some((p) => p.kind === 'sin-evidencia')).toBe(true);
   });
 
+  it('ve el trabajo que el proyecto ya cerro en su roadmap', () => {
+    // El backlog puede apuntar a una seccion que el proyecto ya dio por
+    // hecha. El selector no lo va a ofrecer, y la auditoria tiene que decirlo
+    // para que el backlog no parezca mas grande de lo que es.
+    mkdirSync(join(workspace, 'docs'), { recursive: true });
+    writeFileSync(
+      join(workspace, 'docs', 'roadmap.md'),
+      [
+        '<a id="cerrado"></a>',
+        '',
+        '## Trabajo ya hecho',
+        '',
+        '**Estado:** cerrado (esta parte ya no hace falta)',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const path = writeDeclaration(workspace, {
+      missionId: 'prueba',
+      objective: 'Una mision de prueba',
+      driver: 'plugin',
+      backlog: [candidato({ evidenceRefs: ['docs/roadmap.md#cerrado'] })],
+    });
+
+    const audit = auditDeclaration(path, { workspace });
+    const cerrada = audit.problems.find((p) => p.kind === 'seccion-cerrada');
+
+    expect(cerrada).toBeDefined();
+    expect(cerrada?.candidateId).toBe('trabajo-1');
+    expect(audit.discarded).toBe(1);
+    expect(audit.ready).toBe(0);
+  });
+
   it('ve una referencia que no apunta a ningun fichero', () => {
     const path = writeDeclaration(workspace, {
       missionId: 'prueba',

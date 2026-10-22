@@ -617,10 +617,19 @@ H5 le da persistencia más allá de una sesión.
 - `src/runtime.ts:158` — `existing?.mission ?? toMission(config)`: en cuanto hay
   journal, la misión sale de ahí y **la declaración nunca se vuelve a leer**. El
   backlog queda congelado el día que se creó el journal; añadir o repriorizar un
-  candidato no llega ni al estado ni a la cadena.
+  candidato no llega ni al estado ni a la cadena. **Resuelto**: la declaración
+  manda sobre la intención y el journal conserva el estado.
 - `src/adapters/candidates.ts:32` — el puerto recarga la declaración sin
   `workspace`, lo que lanza, y el `catch` se come el error y cae al backlog del
-  journal. El mismo hueco por otro lado.
+  journal. El mismo hueco por otro lado. **Resuelto**: el puerto carga la
+  declaración con su workspace.
+- El backlog declarado y las propuestas de la sesión respondían a «¿esto sigue
+  pendiente?» con reglas distintas: solo las propuestas miraban si el proyecto
+  ya había cerrado la sección del roadmap que respalda el trabajo. El backlog
+  seguía ofreciendo trabajo ya pagado y la cadena volvía a pagarlo, una y otra
+  vez, hasta quedarse sin presupuesto. **Resuelto**: los dos canales aplican
+  la misma regla, el estado guarda lo que queda y el diagnóstico cuenta lo que
+  se descarta y dice por qué.
 
 **Nota de alcance.** El árbol de decisiones de este proyecto ya está escrito en
 `.goal-compass/` (11 nodos: `grill`, `spec`, `tickets`, `implement`, `review`,
