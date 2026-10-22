@@ -1985,3 +1985,125 @@ cambio. La prueba se ve en rojo antes que en verde:
 ```text
 AssertionError: expected 'tg_fake_1' to be 'tg_fake_2'
 ```
+
+---
+
+## 18 · El empujón que se quedaba esperando para siempre
+
+**Síntoma.** El reloj que mira las misiones —`goal-compass watch`— empujaba
+hacia la sesión con `mcode exec`, y la espera no tenía techo. Un comando que
+no volvía dejaba el empuje colgado, y el nieto que el comando lanzaba —el
+runtime del agente— se quedaba vivo con sus tuberías abiertas cuando lo que
+había que cortar era el grupo entero.
+
+**Por qué importa.** El empuje es un turno de agente en otra sesión: puede
+tardar minutos, y hay que darle ese tiempo. Lo que no puede es*darse* sin
+límite: una espera sin fin es un cuelgue, y el cuelgue no se parece a un
+turno lento.
+
+**Qué se ha cambiado.** `src/adapters/push-runner.ts` sustituye al
+`spawnSync` sin tope por un proceso con reloj:
+
+| | antes | ahora |
+|---|---|---|
+| Espera | `spawnSync`, sin límite | `spawn` con tope (`TOPE_PUSH_MS`, 11 min) |
+| Corte | el proceso moría solo | se corta el **grupo** y se espera a que esté muerto |
+| Tope vencido | — | `timedOut: true`, y el empuje cuenta como fallido, no como entregado |
+| Comando que no existe | excepción sin contexto | `error` explícito, sin colgarse |
+
+El tope de fuera va por encima del de dentro a propósito (`--timeout 10m` en el
+propio comando): así es el comando quien corta el turno, y el de aquí solo
+actúa cuando el comando no vuelve nunca.
+
+**Evidencia.** `test/push-runner.test.ts` lo mira por los dos lados:
+
+```text
+× no espera a un comando que no vuelve            5014ms   ← sin el tope
+× no deja al nieto del comando vivo cuando corta 5001ms   ← sin el tope
+✔ 4 passed (927ms)                                        ← con el tope
+```
+
+Sin el tope, las pruebas se quedan sin respuesta hasta que el comando se
+cansa solo: ese es el modo de fallo real, medido, no imaginado. Con el tope,
+el comando se corta en milisegundos y su nieto deja de estar vivo.
+
+Las 350 pruebas del proyecto pasan con el cambio.
+
+---
+
+## 19 · El trabajo que el proyecto ya dio por hecho
+
+**Síntoma.** La cadena ofrecía trabajo que ya estaba hecho. No era un caso
+raro ni difícil de ver: eran cinco entradas del backlog de esta misma misión,
+y cada vez que la cadena cogía una, gastaba un ciclo entero en rehacer algo
+que ya estaba en su sitio.
+
+**Cómo se encontró.** No leyendo el código: encendiendo la cadena sobre este
+repositorio y mirando lo que el menú de trabajo ofrecía. De las trece entradas
+del backlog, cinco apuntaban a secciones del roadmap que ya estaban cerradas —
+«cerrada» es la palabra con la que una sección dice que su parte de trabajo ya
+no hace falta— y el menú las ofrecía como si fueran trabajo futuro.
+
+**Qué estaba mal.** El trabajo llega por dos canales: el backlog que alguien
+curó a mano en el fichero de la misión y las propuestas que surgen durante la
+sesión. Los dos preguntaban «¿esto sigue pendiente?», pero cada uno con su
+regla: solo las propuestas miraban si el proyecto ya había cerrado la sección
+que respalda el trabajo. El backlog no miraba, y por eso el menú anunciaba
+trabajo ya pagado.
+
+**Qué se ha cambiado.** Una sola regla, preguntada en un solo sitio, y los dos
+canales la hacen:
+
+- El backlog declarado deja fuera el trabajo cuya sección del roadmap está
+  cerrada, igual que ya hacía con las propuestas.
+- El estado de la misión guarda lo que queda, no la historia: el trabajo pagado
+  no se queda guardado como si fuera futuro.
+- El diagnóstico cuenta lo que se descarta y dice por qué, para que un backlog
+  no parezca más grande de lo que es.
+
+**Evidencia.** La misma vista, antes y después, sobre esta misión:
+
+```text
+ANTES    pendientes: 27   (10 del backlog, 14 propuestas, 3 explorations)
+DESPUES  pendientes: 22   ( 5 del backlog, 14 propuestas, 3 explorations)
+```
+
+Y el diagnóstico de la misma declaración:
+
+```text
+ANTES    candidatos: 13 | usables: 13 | descartados: 0
+DESPUES  candidatos: 13 | usables:  8 | descartados: 5
+```
+
+Las pruebas que miran esto fallan sin el arreglo y pasan con él:
+
+```text
+× deja fuera el trabajo cuya seccion del roadmap esta cerrada   ← sin el arreglo
+× el backlog guardado en el journal obeyece la misma regla       ← sin el arreglo
+✔ 4 passed (386ms)                                                ← con el arreglo
+```
+
+Las 356 pruebas del proyecto pasan con el cambio.
+
+### 19.1 El arnés, que es donde se nota el trabajo de verdad
+
+Un arnés sirve para que las pruebas no tengan que montar el mundo a mano. Este
+tenía dos problemas que no se ven hasta que una prueba tarda medio minuto en
+lugar de medio segundo:
+
+**Abría un host de verdad para comprobar cómo se guarda el estado.** Una
+prueba que mira el estado durable no necesita un agente real: necesita un host
+que obedezca las mismas reglas. El arnés tiene ahora ese host en memoria, y la
+prueba que comprueba el estado pasa de 5 s a 0,6 s.
+
+**Escribía el estado a mano.** El arnés montaba el estado de la misión
+copiando a mano su forma. En cuanto el estado gana un campo, el arnés se queda
+con el estado viejo y el fallo aparece como un fallo del escenario. Ahora el
+estado lo prepara el producto, que es lo único que sabe cómo se prepara.
+
+Y el escenario de aceptación del presupuesto se ha retirado: lo que
+comprobaba —que superar el presupuesto de la misión no detiene la cadena— está
+comprobado dentro, donde se puede comprobar sin gastar un turno de agente. Lo
+que solo se puede ver contra el host de verdad se queda: encadenar varios
+objetivos, reconciliar una transición a medias, pausar, reintentar sin
+presupuesto y explorar.
