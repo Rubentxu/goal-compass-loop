@@ -382,6 +382,32 @@ export function emptyMetrics(): MissionMetrics {
 }
 
 /**
+ * El journal de una mision que todavia no ha encadenado nada.
+ *
+ * Vive aqui y no en quien lo escribe porque hay dos que lo necesitan y no
+ * pueden pisarse: el runtime lo persiste al abrir la mision, y quien solo
+ * quiere mirarla lo construye en memoria. Si cada uno montara su propia forma,
+ * el que mira acabaria viendo un estado que el que escribe no reconoce.
+ */
+export function freshJournal(mission: Mission): Journal {
+  return {
+    version: 1,
+    missionId: mission.missionId,
+    sessionId: undefined,
+    mission,
+    goals: [],
+    intents: [],
+    progress: undefined,
+    explored: [],
+    explorationStreak: 0,
+    lastExplorationAt: undefined,
+    budgetAttempts: [],
+    metrics: emptyMetrics(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
  * Completa lo que le falte a un journal escrito por una version anterior.
  *
  * Los journals que ya estaban escritos no tienen intentos ni medidas: se

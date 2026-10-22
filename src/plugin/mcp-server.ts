@@ -27,12 +27,28 @@ import {
   writeProposal,
 } from '../adapters/proposals.js';
 import { completedObjectives, isCompleted } from '../adapters/ledger.js';
-import { normalize, type Journal } from '../core/types.js';
+import { cycleViewOf, renderCycleView, type CycleWorkItem } from '../core/cycle-view.js';
+import { freshJournal, normalize, type Journal, type Mission } from '../core/types.js';
 import { locateMission, type LocatedMission } from './mission-locator.js';
 import type { Logger } from '../ports.js';
 
 /** Version del protocolo MCP que se anuncia por defecto. */
 const PROTOCOL_VERSION = '2024-11-05';
+
+/**
+ * Recurso del protocolo: algo que se puede abrir y leer sin ser una accion.
+ *
+ * La vista del ciclo tambien se expone como recurso porque hay dos maneras de
+ * quererla: como herramienta, cuando el agente decide mirar, y como recurso,
+ * cuando el host lo ofrece para abrirlo. Las dos devuelven el mismo texto.
+ */
+export interface McpResource {
+  uri: string;
+  name: string;
+  description: string;
+  mimeType: string;
+  read(): Promise<string>;
+}
 
 export interface McpTool {
   name: string;
@@ -66,19 +82,64 @@ function completedWork(missionPath: string, state: Journal | null): Set<string> 
   return completed;
 }
 
-/** Herramientas de la misión, listas para el protocolo. */
-export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
-  const locate = (): LocatedMission | null => locateMission(options.cwd);
-  const now = options.now ?? (() => Date.now());
+/** Como se dice de donde sale un trabajo pendiente. */
+function originOf(source: string): CycleWorkItem['origin'] {
+  if (source === 'investigation') return 'propuesta';
+  if (source === 'observed') return 'exploracion';
+  return 'backlog';
+}
 
-  const withoutMission = (): string =>
+/** Lo que se dice cuando en este workspace no hay ninguna mision declarada. */
+function withoutMissionText(options: MissionToolsOptions): string {
+  return (
     'No hay ninguna misión declarada en este workspace. ' +
     'Declárala con la herramienta mission_declare: necesita un objetivo y se ' +
     'encarga del resto. Si la herramienta no está disponible, crea un fichero ' +
     'goal-compass.json en la raíz del repositorio con missionId, objective y ' +
     'backlog.\n' +
     `Buscando en: ${options.cwd}\n` +
-    `Entorno: ${describeEnvironment()}`;
+    `Entorno: ${describeEnvironment()}`
+  );
+}
+
+/**
+ * El texto del ciclo: como va la cadena ahora mismo.
+ *
+ * Es la unica forma de mirar la cadena sin abrir un fichero a mano. La arma
+ * el mismo modulo puro que la lleva dentro del objetivo encadenado, de modo
+ * que lo que ve el agente, lo que ve quien abre el recurso y lo que viaja en
+ * el objetivo nuevo son una sola verdad y no tres.
+ */
+export async function cycleTextOf(options: MissionToolsOptions): Promise<string> {
+  const mission = locateMission(options.cwd);
+  if (!mission) return withoutMissionText(options);
+
+  const journal = new FileJournal(mission.config.missionId);
+  const state = (await journal.load()) ?? freshJournal(toMission(mission.config));
+  const completed = completedWork(mission.configPath, state);
+
+  const composed = new ComposedCandidatePort(
+    buildCandidatePorts(mission.configPath, mission.workspace, {
+      completedObjectives: completed,
+    }),
+  );
+  const available = await composed.discover(state.mission, null);
+
+  const pending: CycleWorkItem[] = available.map((candidate) => ({
+    objective: candidate.objective,
+    evidence: candidate.evidenceRefs,
+    origin: originOf(candidate.source),
+  }));
+
+  return renderCycleView(cycleViewOf(state, { completed, pending }));
+}
+
+/** Herramientas de la misión, listas para el protocolo. */
+export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
+  const locate = (): LocatedMission | null => locateMission(options.cwd);
+  const now = options.now ?? (() => Date.now());
+
+  const withoutMission = (): string => withoutMissionText(options);
 
   return [
     {
@@ -195,6 +256,19 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
           }
         }
         return lines.join('\n');
+      },
+    },
+    {
+      name: 'mission_cycle',
+      description:
+        'La vista del ciclo activo, en texto: que quiere la mision, que objetivo va ' +
+        'ahora y con que evidencia, que objetivos estan hechos y con que estado, que ' +
+        'trabajo queda, cuanto presupuesto se ha gastado y que camino conduce la ' +
+        'mision. Es lo que hay que reflejar en la lista de tareas, para que el ' +
+        'progreso se vea sin que nadie tenga que pedirlo.',
+      inputSchema: { type: 'object', properties: {} },
+      async run(): Promise<string> {
+        return await cycleTextOf(options);
       },
     },
     {
@@ -318,6 +392,29 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
   }
 }
 
+/**
+ * Los recursos de la mision: lo que se puede abrir y leer sin actuar.
+ *
+ * La vista del ciclo tambien es un recurso porque hay dos maneras legitimas de
+ * quererla: invocarla como herramienta cuando el agente decide mirar, o abrirla
+ * como recurso cuando el host la ofrece para inspeccion. Las dos devuelven el
+ * mismo texto, y por eso salen del mismo sitio.
+ */
+export function buildMissionResources(options: MissionToolsOptions): McpResource[] {
+  return [
+    {
+      uri: 'goal-compass://ciclo',
+      name: 'Ciclo activo',
+      description:
+        'Como va la mision ahora mismo: objetivo, objetivo en curso con su ' +
+        'evidencia, objetivos hechos y pendientes, presupuesto gastado y camino ' +
+        'que conduce la cadena.',
+      mimeType: 'text/plain',
+      read: async () => await cycleTextOf(options),
+    },
+  ];
+}
+
 interface JsonRpcMessage {
   jsonrpc?: string;
   id?: number | string | null;
@@ -335,6 +432,7 @@ interface JsonRpcMessage {
 export async function handleMessage(
   message: JsonRpcMessage,
   tools: McpTool[],
+  resources: McpResource[] = [],
 ): Promise<unknown | null> {
   const { id, method, params } = message;
   if (method === undefined) return null;
@@ -344,7 +442,7 @@ export async function handleMessage(
       const requested = params?.protocolVersion;
       return {
         protocolVersion: typeof requested === 'string' ? requested : PROTOCOL_VERSION,
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, resources: {} },
         serverInfo: { name: 'goal-compass', version: '1' },
       };
     }
@@ -358,6 +456,40 @@ export async function handleMessage(
           inputSchema: tool.inputSchema,
         })),
       };
+    case 'resources/list':
+      return {
+        resources: resources.map((resource) => ({
+          uri: resource.uri,
+          name: resource.name,
+          description: resource.description,
+          mimeType: resource.mimeType,
+        })),
+      };
+    case 'resources/read': {
+      const uri = String(params?.uri ?? '');
+      const resource = resources.find((candidate) => candidate.uri === uri);
+      if (!resource) {
+        return {
+          contents: [{ uri, mimeType: 'text/plain', text: `No existe el recurso "${uri}".` }],
+          isError: true,
+        };
+      }
+      try {
+        const text = await resource.read();
+        return { contents: [{ uri: resource.uri, mimeType: resource.mimeType, text }] };
+      } catch (err) {
+        return {
+          contents: [
+            {
+              uri: resource.uri,
+              mimeType: 'text/plain',
+              text: `El recurso "${uri}" falló: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
     case 'tools/call': {
       const name = String(params?.name ?? '');
       const tool = tools.find((candidate) => candidate.name === name);
@@ -384,6 +516,7 @@ export async function handleMessage(
 /** Arranca el servidor sobre la entrada y salida estándar. */
 export async function serve(options: MissionToolsOptions): Promise<void> {
   const tools = buildMissionTools(options);
+  const resources = buildMissionResources(options);
   const input = createInterface({ input: process.stdin });
 
   input.on('line', (line) => {
@@ -395,7 +528,7 @@ export async function serve(options: MissionToolsOptions): Promise<void> {
       } catch {
         return;
       }
-      const result = await handleMessage(message, tools);
+      const result = await handleMessage(message, tools, resources);
       if (result === null || result === undefined) return;
       if (message.id === undefined || message.id === null) return;
       process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n`);

@@ -25,6 +25,7 @@ import { locateMission } from './mission-locator.js';
 import { keeperSocketPath } from './keeper-protocol.js';
 import { parseHookEvent, type HookEvent } from './hook-event.js';
 import { readStdinPayload, STDIN_READ_DEADLINE_MS } from './stdin-payload.js';
+import { cycleViewOf, renderCycleView } from '../core/cycle-view.js';
 import type { GoalAdapter, Logger } from '../ports.js';
 import type { Journal } from '../core/types.js';
 
@@ -299,34 +300,13 @@ function closingRule(): string {
  *
  * Es lo que el agente necesita para no empezar a ciegas: que se ha hecho, que
  * queda y por que la mision esta como esta.
+ *
+ * Se pinta con el mismo modulo que la vista del ciclo, para que el objetivo
+ * que recibe el agente y la vista que puede pedir durante el turno sean la
+ * misma verdad y no dos descripciones que se pueden desincronizar.
  */
 function contextOf(state: Journal): string {
-  const completed = state.goals.filter((goal) => goal.status === 'complete');
-  const metrics = state.metrics;
-  const tokens =
-    metrics?.tokensUsed ?? state.goals.reduce((total, goal) => total + goal.tokensUsed, 0);
-  const budget = state.mission.totalTokenBudget;
-  const last = completed[completed.length - 1];
-  const chained =
-    metrics?.goalsCreated ?? state.intents.filter((intent) => intent.status === 'committed').length;
-  const exhaustions = metrics?.budgetExhaustions ?? state.budgetAttempts?.length ?? 0;
-
-  const lines = [
-    `Contexto de la mision "${state.mission.missionId}":`,
-    `- estado: ${state.mission.status}${state.mission.reason ? ` (${state.mission.reason})` : ''}`,
-    `- objetivos completados: ${completed.length}` +
-      (last ? `; el ultimo fue "${last.objective}"` : ''),
-    `- objetivos encadenados antes de este: ${chained}`,
-    `- presupuesto: ${tokens} token(s)${budget !== null ? ` de ${budget}` : ''}` +
-      (metrics?.budgetExceeded ? ' (superado: la cadena sigue, el presupuesto es una medida)' : ''),
-    `- trabajo declarado pendiente: ${state.mission.backlog.length} candidato(s)`,
-  ];
-
-  if (exhaustions > 0) {
-    lines.push(`- intentos que se quedaron sin presupuesto: ${exhaustions}`);
-  }
-
-  return lines.join('\n');
+  return renderCycleView(cycleViewOf(state), { maxDone: 3, maxPending: 3 });
 }
 
 /**

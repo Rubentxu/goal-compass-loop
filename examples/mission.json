@@ -2,6 +2,7 @@
   "missionId": "ejemplo-mision",
   "objective": "Mejorar y estabilizar el proyecto de forma continua, sin intervención manual entre Goals",
   "workspace": "/var/home/rubentxu/Proyectos/Typescript/goalCompassLoop",
+  "driver": "plugin",
   "defaultTokenBudget": 120000,
   "totalTokenBudget": 600000,
   "maxGoals": null,
@@ -11,10 +12,10 @@
   "allowRemoteWrite": false,
   "backlog": [
     {
-      "candidateId": "ejemplo-fix",
-      "objective": "Reproducir y corregir el fallo descrito en docs/EVIDENCIA.md, con una prueba que falle antes y pase despues",
-      "whyNow": "El backlog real tiene una incidencia reproducible abierta",
-      "evidenceRefs": ["docs/EVIDENCIA.md#incidencia"],
+      "candidateId": "ejemplo-comprobar-declaracion",
+      "objective": "Comprobar que la declaracion de una mision se valida al declararla, con un caso de prueba que falle antes y pase despues",
+      "whyNow": "La declaracion es la puerta de entrada: si se pierde un campo, el trabajo se queda sin criterio de cierre",
+      "evidenceRefs": ["docs/roadmap.md#p11"],
       "doneWhen": [
         "La prueba que fallaba antes pasa despues del cambio",
         "La suite existente sigue en verde"
@@ -26,10 +27,10 @@
       "source": "observed"
     },
     {
-      "candidateId": "ejemplo-mejora",
-      "objective": "Mejorar la clarity de los mensajes de error del supervisor ACP, con casos de prueba",
-      "whyNow": "Depende de la incidencia anterior ya resuelta",
-      "evidenceRefs": ["docs/EVIDENCIA.md#mejora"],
+      "candidateId": "ejemplo-comprobar-evidencia",
+      "objective": "Cubrir con pruebas que la referencia a la evidencia de un candidato se comprueba, y no se acepta por parecer valida",
+      "whyNow": "Depende del trabajo anterior ya resuelto",
+      "evidenceRefs": ["docs/roadmap.md#p13"],
       "doneWhen": [
         "Los mensajes de error distinguen el caso concreto",
         "Hay casos de prueba para cada rama de error"
@@ -37,7 +38,7 @@
       "scope": "src/adapters/",
       "risk": "medium",
       "priority": 5,
-      "prerequisites": ["ejemplo-fix"],
+      "prerequisites": ["ejemplo-comprobar-declaracion"],
       "source": "roadmap"
     }
   ]
