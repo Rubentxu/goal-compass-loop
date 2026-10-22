@@ -27,7 +27,7 @@ import {
   writeProposal,
 } from '../adapters/proposals.js';
 import { completedObjectives, isCompleted } from '../adapters/ledger.js';
-import { cycleViewOf, renderCycleView, type CycleWorkItem } from '../core/cycle-view.js';
+import { cycleViewOf, driverLine, renderCycleView, whyNotChained, type CycleWorkItem } from '../core/cycle-view.js';
 import { freshJournal, normalize, type Journal, type Mission } from '../core/types.js';
 import { locateMission, type LocatedMission } from './mission-locator.js';
 import type { Logger } from '../ports.js';
@@ -230,11 +230,15 @@ export function buildMissionTools(options: MissionToolsOptions): McpTool[] {
           ? [
               `Misión: ${state.mission.missionId} — ${state.mission.objective}`,
               `Estado: ${state.mission.status}${state.mission.reason ? ` (${state.mission.reason})` : ''}`,
+              `Conduce: ${driverLine(state.mission.driver ?? null)}`,
+              `Cadena: ${whyNotChained(cycleViewOf(state, { completed }))}`,
               `Objetivos encadenados: ${state.intents.filter((i) => i.status === 'committed').length}`,
             ]
           : [
               `Misión: ${mission.config.missionId} — ${mission.config.objective}`,
               'Estado: declarada, todavía sin empezar. La cadena arranca sola en el primer cierre de turno.',
+              'Conduce: nadie todavia: los dos caminos estan esperando',
+              'Cadena: la mision esta declarada pero la cadena todavia no ha arrancado',
             ];
 
         const verdicts = reviewProposals(mission.config.missionId, mission.workspace, completed);

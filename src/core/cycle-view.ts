@@ -50,6 +50,8 @@ export interface CycleView {
   status: MissionStatus;
   /** Que camino conduce la mision, si alguno. */
   driver: Driver | null;
+  /** Por que esta en el estado en que esta, si hay un motivo. */
+  reason: string | null;
   /** El objetivo en curso, si lo hay. */
   current: CycleCurrent | null;
   /** Los objetivos ya registrados, con su estado. */
@@ -97,6 +99,7 @@ export function cycleViewOf(state: Journal, options: CycleViewOptions = {}): Cyc
     objective: state.mission.objective,
     status: state.mission.status,
     driver: state.mission.driver ?? null,
+    reason: state.mission.reason ?? null,
     current: currentWork(state),
     done: state.goals.map((record) => ({
       goalId: record.goalId,
@@ -197,10 +200,47 @@ function pendingWork(
 }
 
 /** Como se dice quien conduce la mision, en una frase. */
-function driverLine(driver: Driver | null): string {
+export function driverLine(driver: Driver | null): string {
   if (driver === 'plugin') return 'el plugin (encadena desde la sesion)';
   if (driver === 'supervisor') return 'el supervisor (proceso externo)';
   return 'nadie todavia: los dos caminos estan esperando';
+}
+
+/**
+ * Por que la cadena esta como esta, en una frase.
+ *
+ * Sin esto, "no hay trabajo" y "otro camino conduce" son la misma cosa, y el
+ * agente no puede aplicar la regla de la skill —que dice que si el estado
+ * nombra a quien conduce, no espere al siguiente objetivo—. Cada caso dice lo
+ * suyo: la cadena aparcada, la cadena parada, un objetivo en curso, el camino
+ * que tiene el mando, o que no hay trabajo elegible.
+ */
+export function whyNotChained(view: CycleView): string {
+  if (view.status === 'paused_by_user') {
+    return 'la cadena esta pausada por el usuario: no se encadena nada hasta que se reanude';
+  }
+  if (view.status === 'stopped_by_user') {
+    return 'la cadena esta parada: no se encadena nada';
+  }
+  if (view.status === 'escalated') {
+    return `la cadena necesita a alguien: no se encadena nada${view.reason ? ` (${view.reason})` : ''}`;
+  }
+  if (view.status === 'parked') {
+    return `la cadena esta aparcada${view.reason ? `: ${view.reason}` : ': no hay trabajo util'}`;
+  }
+  if (view.current) {
+    return `hay un objetivo en curso: ${view.current.objective}`;
+  }
+  if (view.driver === 'plugin') {
+    return 'conduce el plugin: el siguiente objetivo se encadena al cerrar el turno';
+  }
+  if (view.driver === 'supervisor') {
+    return 'conduce el supervisor: el siguiente objetivo se encadena en su siguiente sondeo';
+  }
+  if (view.pending.length === 0) {
+    return 'no hay trabajo elegible: el backlog esta vacio y la exploracion no ha encontrado nada';
+  }
+  return 'nadie conduce todavia: el primer camino que actue tomara el mando';
 }
 
 /** Miles con punto, que es como se leen los numeros en este proyecto. */
