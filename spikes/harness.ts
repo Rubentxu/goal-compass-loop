@@ -17,6 +17,7 @@ import { AcpGoalAdapter } from '../src/adapters/acp-goal.js';
 import { FileControlPort } from '../src/adapters/control.js';
 import { FileJournal } from '../src/adapters/journal.js';
 import { ComposedCandidatePort } from '../src/adapters/candidates.js';
+import { RuntimeGoalHistory } from '../src/adapters/goal-history.js';
 import { SessionExploration } from '../src/adapters/exploration.js';
 import { ChainLock } from '../src/adapters/ownership.js';
 import { loadMissionConfig } from '../src/adapters/mission.js';
@@ -98,8 +99,14 @@ export interface ScenarioContext {
   }): void;
   /** Cambia un limite de la mision ya inicializada. */
   patchMission(patch: Partial<Mission>): Promise<void>;
-  /** Reinicia el host ACP reanudando la misma sesion. */
-  restartHost(): Promise<void>;
+  /**
+   * Reinicia el host ACP.
+   *
+   * Con `nuevaSesion` el host arranca en una sesion distinta: la anterior se
+   * queda sin dueno y sus objetivos se van con ella, que es lo que pasa cuando
+   * la sesion se cierra de verdad.
+   */
+  restartHost(nuevaSesion?: boolean): Promise<void>;
   /**
    * Si el registro del escenario contiene un texto.
    *
@@ -201,6 +208,7 @@ export async function runScenario(
           buildCandidatePorts(missionFile, workspace, { maxEvidence: 5 }),
         ),
         journalPort: journal,
+        historyPort: new RuntimeGoalHistory(),
         chainLock: new ChainLock(missionId),
         controlPort: control,
         explorationPort: new SessionExploration(adapter!, workspace),
@@ -281,10 +289,14 @@ export async function runScenario(
       state.mission = { ...state.mission, ...patch };
       await journal.saveAtomically(state);
     },
-    async restartHost() {
-      const sessionId = adapter?.sessionId();
+    async restartHost(nuevaSesion = false) {
+      const sessionId = nuevaSesion ? undefined : adapter?.sessionId();
       await adapter?.close();
-      adapter = new AcpGoalAdapter({ workspace, sessionId, logger: log });
+      adapter = new AcpGoalAdapter({
+        workspace,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        logger: log,
+      });
       await adapter.start();
     },
     logContains(text: string) {

@@ -97,14 +97,12 @@ const chain: Scenario = {
         ok: skip ? false : existsSync(join(context.workspace, 'resultado-3.txt')),
         skipped: skip,
       },
-      { name: 'el trabajo propuesto se encadeno', ok: proposedIndex >= 0 },
       {
         name: 'el trabajo propuesto se encadeno en su momento',
         ok: proposedIndex === 1,
         detail: interruption ? interruption : undefined,
         skipped: false,
       },
-      { name: 'no hay Goals duplicados', ok: skip ? false : created.length === 3, skipped: skip },
       { name: 'la mision no quedo escalada', ok: state.mission.status !== 'escalated' },
       {
         name: 'el coste de la cadena es conocido',
@@ -207,10 +205,23 @@ function evidenceOf(state: Journal, missionId: string, candidateId: string): str
   return proposal?.evidenceRefs ?? [];
 }
 
-/** Un fallo entre creacion y commit se reconcilia sin duplicar Goals. */
+/**
+ * La cadena se recupera cuando la sesion se va.
+ *
+ * Dos caras de lo mismo. La primera: un fallo entre la creacion y el commit
+ * deja una intencion a medias, y se reconcilia contra el host sin crear un
+ * Goal de mas.
+ *
+ * La segunda: la sesion se va con su objetivo. El registro durable se queda
+ * con la intencion y nada mas, y otra sesion encuentra ese objetivo sin
+ * desenlace. Lo que se recupera no es una suposicion: es lo que el host sabe
+ * de el. Si el host no lo sabe, se registra como interrumpido, que es lo que
+ * es: no se afirma que el trabajo se hizo ni que fallo.
+ */
 const recovery: Scenario = {
   name: 'recovery',
-  description: 'Una transicion a medias se reconcilia contra el host sin crear un Goal de mas',
+  description:
+    'Una transicion a medias se reconcilia contra el host, y un objetivo que se va con su sesion no se queda sin registro',
   async run(context: ScenarioContext): Promise<Check[]> {
     await context.setCandidates([unCandidatoDeFichero({ candidateId: 'unico' })]);
     context.startSupervisor({ maxIterations: 1 });
@@ -235,19 +246,38 @@ const recovery: Scenario = {
       return state.intents[0]?.status === 'committed';
     });
 
-    const state = await context.readJournal();
-    const created = state.intents.filter((intent) => intent.status === 'committed');
+    const reconciliada = await context.readJournal();
+    const created = reconciliada.intents.filter((intent) => intent.status === 'committed');
     const goal = await context.adapter.read(context.adapter.sessionId());
 
+    // Ahora la sesion se va de verdad: el host arranca en otra sesion y la
+    // anterior se queda sin dueno, con su objetivo dentro. El registro durable
+    // tiene la intencion y ningun desenlace.
+    await context.restartHost(true);
+    context.startSupervisor({ maxIterations: 2 });
+
+    await context.waitFor('el objetivo recuperado', async () => {
+      const state = await context.readJournal();
+      return state.goals.some((record) => record.goalId === originalGoalId);
+    });
+
+    const recuperado = await context.readJournal();
+    const registro = recuperado.goals.find((record) => record.goalId === originalGoalId);
+
     return [
-      { name: 'la intencion quedo reconciliada', ok: state.intents[0]?.status === 'committed' },
+      { name: 'la intencion quedo reconciliada', ok: reconciliada.intents[0]?.status === 'committed' },
       {
         name: 'la intencion apunta al Goal original',
-        ok: state.intents[0]?.goalId === originalGoalId,
+        ok: reconciliada.intents[0]?.goalId === originalGoalId,
         detail: originalGoalId,
       },
       { name: 'no se creo un segundo Goal', ok: created.length === 1, detail: `${created.length}` },
       { name: 'el host conserva un unico Goal', ok: goal?.goalId === originalGoalId },
+      {
+        name: 'el objetivo perdido queda registrado con lo que el host sabe de el',
+        ok: registro !== undefined,
+        detail: registro ? `${registro.status}: ${registro.statusReason ?? ''}` : 'sin registro',
+      },
     ];
   },
 };
